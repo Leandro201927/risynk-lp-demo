@@ -1,0 +1,24 @@
+@media (max-width: 1023px) { .chapter { width: 44%; } }
+@media (max-width: 767px) {
+  :root { --story-length: 900svh; }
+  .nav { top: var(--space-10); padding: var(--space-6) var(--space-11); gap: var(--space-10); }
+  .nav__links { gap: var(--space-10); font-size: 13px; order: 3; width: 100%; justify-content: space-between; }
+  .nav { flex-wrap: wrap; }
+  .stage-canvas { bottom: auto; height: 50svh; }
+  .stage-info { align-items: flex-end; padding: 0; }
+  .stage-info__col {
+    width: 100%; height: 50svh; background: var(--color-pure-white);
+    border-radius: var(--radius-card) var(--radius-card) 0 0; border-top: var(--hairline) solid var(--line);
+    padding: var(--space-22) var(--space-30) var(--space-22);
+  }
+  .chapter { width: 100%; max-width: none; min-width: 0; left: var(--space-30); right: var(--space-30); top: var(--space-22); transform: none; width: auto; }
+  .chapter__inner { gap: var(--space-10); }
+  .chapter__title { font-size: 20px; }
+  .chapter__desc { font-size: 14px; }
+  .chapter__label { font-size: var(--text-caption); }
+  .chapter__actions { gap: var(--space-10); }
+  .rail__btn { min-width: 40px; min-height: 28px; }
+  .rail { left: var(--space-30); bottom: var(--space-10); }
+  .rail__bar { display: none; }
+}
+@media (min-width: 768px) { :root { --story-length: 1000svh; } }
