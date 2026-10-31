@@ -14,25 +14,36 @@ export function createCylinderUniforms(): CylinderUniforms {
 }
 
 const CYL_UNIFORMS = `uniform float uDissolve; uniform float uNozzle; uniform vec3 uCyan; uniform float uAmbient; varying vec3 vLocalPos;`;
+// Materialización mecánica: la energía "construye" el cohete desde la tobera hacia la ojiva (barrido axial).
 const DISSOLVE = `
-float rkN = rkNoise3(vLocalPos * 9.0 + 3.1);
-float rkEdge = uDissolve * 1.12 - rkN;
+float rkAx = (vLocalPos.y + 0.5);                       // 0 = tobera, 1 = punta
+float rkEdge = uDissolve * 1.06 - rkAx - (rkNoise3(vLocalPos * 14.0 + 3.1) - 0.5) * 0.04;
 if (rkEdge < 0.0) discard;
-float rkDissolveGlow = 1.0 - smoothstep(0.0, 0.09, rkEdge);
+float rkDissolveGlow = (1.0 - smoothstep(0.0, 0.07, rkEdge)) * step(uDissolve, 0.999);
 `;
+
+const EMISSION = `
+{
+  float y = vLocalPos.y;
+  float ring = exp(-pow((y + 0.30) / 0.008, 2.0));            // banda cian de cuerpo
+  float cap = smoothstep(-0.455, -0.47, y);                   // interior de la tobera
+  float tail = exp(-(y + 0.5) * 9.0) * 0.18;
+  float flick = 1.0 + 0.06 * sin(uAmbient * 9.0);
+  totalEmissiveRadiance += uCyan * (uNozzle * flick * (ring * 1.2 + cap * 1.8 + tail) + rkDissolveGlow * 0.9);
+}`;
 
 /** Cerámica blanca con rugosidad variable, anillo y tobera emisivos, y disolución de materialización. */
 export function createCylinderMaterial(u: CylinderUniforms): MeshPhysicalMaterial {
   const m = new MeshPhysicalMaterial({
-    color: new Color(PALETTE.cool),
-    roughness: 0.28,
+    color: new Color('#F2F2F7'),
+    roughness: 0.3,
     metalness: 0,
     clearcoat: 0.6,
     clearcoatRoughness: 0.12,
     specularIntensity: 0.7,
     specularColor: new Color(PALETTE.ice),
   });
-  m.customProgramCacheKey = () => 'rk-cyl-v1';
+  m.customProgramCacheKey = () => 'rk-cyl-v2';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
@@ -44,27 +55,16 @@ export function createCylinderMaterial(u: CylinderUniforms): MeshPhysicalMateria
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-roughnessFactor = clamp(roughnessFactor + 0.06 * sin(vLocalPos.y * 38.0) + (rkNoise3(vLocalPos * 30.0) - 0.5) * 0.08, 0.05, 1.0);`,
+roughnessFactor = clamp(roughnessFactor + (rkNoise3(vLocalPos * 30.0) - 0.5) * 0.06, 0.05, 1.0);`,
       )
-      .replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-{
-  float y = vLocalPos.y;
-  float ring = exp(-pow((y + 0.39) / 0.012, 2.0));
-  float cap = smoothstep(-0.443, -0.449, y);
-  float tail = exp(-(y + 0.45) * 7.0) * 0.28;
-  float flick = 1.0 + 0.08 * sin(uAmbient * 9.0);
-  totalEmissiveRadiance += uCyan * (uNozzle * flick * (ring * 1.7 + cap * 2.2 + tail) + rkDissolveGlow * 1.5);
-}`,
-      );
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${EMISSION}`);
   };
   return m;
 }
 
 export function createCylinderDepthMaterial(u: CylinderUniforms): MeshDepthMaterial {
   const m = new MeshDepthMaterial({ depthPacking: RGBADepthPacking });
-  m.customProgramCacheKey = () => 'rk-cyl-depth-v1';
+  m.customProgramCacheKey = () => 'rk-cyl-depth-v2';
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uDissolve = u.uDissolve as IUniform;
     shader.vertexShader = shader.vertexShader
@@ -72,7 +72,7 @@ export function createCylinderDepthMaterial(u: CylinderUniforms): MeshDepthMater
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocalPos = position;');
     shader.fragmentShader = shader.fragmentShader
       .replace('void main() {', `uniform float uDissolve; varying vec3 vLocalPos;\n${NOISE3}\nvoid main() {`)
-      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif (uDissolve * 1.12 - rkNoise3(vLocalPos * 9.0 + 3.1) < 0.0) discard;`);
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif (uDissolve * 1.06 - (vLocalPos.y + 0.5) - (rkNoise3(vLocalPos * 14.0 + 3.1) - 0.5) * 0.04 < 0.0) discard;`);
   };
   return m;
 }
@@ -85,12 +85,9 @@ void main() { vLocalPos = position; gl_Position = projectionMatrix * modelViewMa
     fragmentShader: `${CYL_UNIFORMS}\n${NOISE3}
 void main() {
   ${DISSOLVE}
-  float y = vLocalPos.y;
-  float ring = exp(-pow((y + 0.39) / 0.012, 2.0));
-  float cap = smoothstep(-0.443, -0.449, y);
-  float tail = exp(-(y + 0.45) * 7.0) * 0.28;
-  float flick = 1.0 + 0.08 * sin(uAmbient * 9.0);
-  gl_FragColor = vec4(uCyan * (uNozzle * flick * (ring * 1.7 + cap * 2.2 + tail) + rkDissolveGlow * 1.5), 1.0);
+  vec3 totalEmissiveRadiance = vec3(0.0);
+  ${EMISSION}
+  gl_FragColor = vec4(totalEmissiveRadiance, 1.0);
 }`,
   });
 }

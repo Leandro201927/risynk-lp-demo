@@ -63,17 +63,38 @@ export class WebGLPipeline {
       this.gtao.output = GTAOPass.OUTPUT.Default;
       this.gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1, scale: 1, samples: q.gtao.samples, distanceFallOff: 1 });
       this.gtao.blendIntensity = q.gtao.intensity;
+      this.excludeFromDepth(this.gtao);
       this.finalComposer.addPass(this.gtao);
     }
     this.mixPass = new ShaderPass(BloomMixShader);
     this.finalComposer.addPass(this.mixPass);
     if (q.dof.enabled) {
       this.bokeh = new BokehPass(this.scene, this.camera, { focus: 5, aperture: 0, maxblur: q.dof.maxBlur });
+      this.excludeFromDepth(this.bokeh);
       this.finalComposer.addPass(this.bokeh);
     }
     this.finalComposer.addPass(new OutputPass());
     if (q.smaa) this.finalComposer.addPass(new SMAAPass());
     this.setSize(this.w, this.h, this.pr);
+  }
+
+  private noDepth: Object3D[] = [];
+
+  /**
+   * Los planos de suelo (sombra/contacto) y los billboards de luz no son geometría sólida: si entran en la pasada de
+   * normales/profundidad del AO o del DoF producen rectángulos y estrías. Se ocultan solo durante esas pasadas.
+   */
+  private excludeFromDepth(pass: { render: (...args: never[]) => void }): void {
+    const original = pass.render.bind(pass) as (...args: unknown[]) => void;
+    (pass as unknown as { render: (...args: unknown[]) => void }).render = (...args: unknown[]) => {
+      const hidden = this.noDepth.filter((o) => o.visible);
+      for (const o of hidden) o.visible = false;
+      try {
+        original(...args);
+      } finally {
+        for (const o of hidden) o.visible = true;
+      }
+    };
   }
 
   rebuild(q: QualityConfig): void {
@@ -96,7 +117,9 @@ export class WebGLPipeline {
   /** Recorre la escena y registra qué material usar en la pasada de máscara (userData.bloom: 'self' | Material | 'hide'). */
   refreshBloomList(): void {
     this.entries = [];
+    this.noDepth = [];
     this.scene.traverse((o) => {
+      if (o.userData.noDepth) this.noDepth.push(o);
       const any = o as Object3D & { material?: Material | Material[]; isMesh?: boolean; isPoints?: boolean };
       if (!(any.isMesh || any.isPoints) || !any.material) return;
       const tag = o.userData.bloom as Material | 'self' | 'hide' | undefined;

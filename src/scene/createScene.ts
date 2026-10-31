@@ -1,14 +1,16 @@
 import {
   AgXToneMapping, ColorManagement, Group, Matrix4, Mesh, Object3D, PlaneGeometry, Quaternion, Scene,
-  ShaderMaterial, ShadowMaterial, SRGBColorSpace, Vector3, WebGLRenderer, Color,
+  MeshPhysicalMaterial, ShaderMaterial, ShadowMaterial, SRGBColorSpace, Vector3, WebGLRenderer, Color,
 } from 'three';
 import type { StoryState } from './animation/storyState';
 import { CameraController } from './camera/CameraController';
 import { createTriangleProxy, triangleMetrics, type TriangleProxy } from './geometry/createTriangleProxy';
-import { createCylinderProxy, type CylinderProxy } from './geometry/createCylinderProxy';
+import { createCylinderProxy, CYL, type CylinderProxy } from './geometry/createCylinderProxy';
+import { createStorefront, type Storefront } from './geometry/createStorefront';
+import { createLaunchMount, MOUNT, type LaunchMount } from './geometry/createLaunchMount';
 import { LaunchPath, LAUNCH_SECONDS } from './geometry/launchPath';
 import {
-  createTriangleBloomMaterial, createTriangleDepthMaterial, createTriangleMaterial, createTriangleUniforms,
+  beamUniforms, createTriangleBloomMaterial, createTriangleDepthMaterial, createTriangleMaterial, createTriangleUniforms,
 } from './materials/createTriangleMaterial';
 import {
   createCylinderBloomMaterial, createCylinderDepthMaterial, createCylinderMaterial, createCylinderUniforms,
@@ -23,7 +25,7 @@ import { ExhaustSystem } from './particles/ExhaustSystem';
 import type { QualityConfig } from './quality/qualityProfiles';
 
 export const PAGE_BACKGROUND = '#f2f2f4';
-export const EXPOSURE = 1.0;
+export const EXPOSURE = 1.3;
 
 const Y = new Vector3(0, 1, 0);
 
@@ -42,13 +44,15 @@ export class LiveSceneBackend {
   readonly exhaust: ExhaustSystem;
   readonly lighting: LightingController;
   private env: EnvironmentHandle;
-  private triU = createTriangleUniforms(triangleMetrics());
+  private triU = createTriangleUniforms();
+  readonly storefront: Storefront;
+  readonly mount: LaunchMount;
+  private contactBlob: Mesh;
   private cylU = createCylinderUniforms();
   private shadowCatcher: Mesh;
   private shadowMat: ShadowMaterial;
   private blobMat: ShaderMaterial;
   private disposables: Array<{ dispose(): void }> = [];
-  private tmpV = new Vector3();
   private tmpV2 = new Vector3();
   private tmpQ = new Quaternion();
   private qStart = new Quaternion();
@@ -73,21 +77,37 @@ export class LiveSceneBackend {
 
     this.env = createEnvironment(renderer);
     this.scene.environment = this.env.texture;
-    this.scene.environmentIntensity = 0.85;
+    this.scene.environmentIntensity = 0.6;
 
-    // Triángulo
-    const triMat = createTriangleMaterial(this.triU);
-    this.triangle = createTriangleProxy(triMat, q);
-    this.triangle.mesh.customDepthMaterial = createTriangleDepthMaterial(this.triU);
-    const triBloom = createTriangleBloomMaterial(this.triU);
-    this.triangle.mesh.userData.bloom = triBloom;
-    this.disposables.push(triMat, triBloom, this.triangle.mesh.customDepthMaterial as unknown as { dispose(): void });
+    // Oclusor negro para la pasada de bloom (volúmenes sólidos que no deben emitir pero sí tapar emisión).
+    const occluder = new ShaderMaterial({ vertexShader: 'void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }', fragmentShader: 'void main(){ gl_FragColor = vec4(0.0,0.0,0.0,1.0); }' });
+    this.disposables.push(occluder);
+
+    // Triángulo: tres vigas, cada una con sus uniforms de arista (materiales, profundidad y bloom propios).
+    const metrics = triangleMetrics();
+    const beamU = [0, 1, 2].map((k) => beamUniforms(this.triU, metrics, k));
+    const triMats = beamU.map((u) => createTriangleMaterial(u)) as unknown as [MeshPhysicalMaterial, MeshPhysicalMaterial, MeshPhysicalMaterial];
+    this.triangle = createTriangleProxy(triMats, q);
+    this.triangle.meshes.forEach((mesh, k) => {
+      const depth = createTriangleDepthMaterial(beamU[k] as typeof this.triU);
+      const bloom = createTriangleBloomMaterial(beamU[k] as typeof this.triU);
+      mesh.customDepthMaterial = depth;
+      mesh.userData.bloom = bloom;
+      this.disposables.push(triMats[k]!, depth, bloom);
+    });
     this.scene.add(this.triangle.group);
     this.triangle.group.updateMatrixWorld(true);
 
+    // Fachada procedural (escena 01/04) y cuna de lanzamiento en el vértice superior (escena 05/06).
+    this.storefront = createStorefront(occluder);
+    this.triangle.group.add(this.storefront.group);
+    this.mount = createLaunchMount(occluder);
+    this.triangle.group.add(this.mount.group);
+
     // Trayectoria compartida (cilindro + partículas + cámara + órbitas)
-    const topWorld = this.triangle.group.localToWorld((this.triangle.centerline[2] as Vector3).clone());
-    this.path = new LaunchPath(topWorld, buildOrbitSpecs()[0]);
+    // El cohete reposa en la cuna del vértice: su tobera asienta a MOUNT.seat sobre la cara plana del ápice.
+    const restPos = new Vector3(0, MOUNT.baseY + MOUNT.seat + CYL.height / 2, 0);
+    this.path = new LaunchPath(restPos, buildOrbitSpecs()[0]);
     this.orbits = new OrbitController(
       this.path, q,
       this.triangle.centerline.map((v) => this.triangle.group.localToWorld(v.clone())),
@@ -114,19 +134,32 @@ export class LiveSceneBackend {
     this.scene.add(exhaustRoot);
     this.exhaust = new ExhaustSystem(this.path, q, exhaustRoot);
 
-    // Sombra de contacto. Tier 0: blob radial barato; resto: ShadowMaterial recibiendo la luz principal.
-    this.shadowMat = new ShadowMaterial({ color: new Color('#8A86A3'), opacity: 0.16 });
+    // Sombra de contacto: mancha elíptica muy suave bajo la base (siempre) + sombra proyectada de la luz principal
+    // sobre el plano de apoyo (tiers con sombras). Sitúa la escultura en el espacio sin parecer un reflejo.
+    const GROUND_Y = -0.7;
+    this.shadowMat = new ShadowMaterial({ color: new Color('#7F7A9E'), opacity: 0.2 });
+    // Plano grande con gaussiana elíptica EN ESPACIO MUNDO: sus bordes quedan fuera de campo (un plano pequeño
+    // entra en la pasada de normales/profundidad del AO y dibuja un rectángulo).
     this.blobMat = new ShaderMaterial({
       transparent: true, depthWrite: false,
-      vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-      fragmentShader: 'varying vec2 vUv; void main(){ float r=length(vUv-0.5)*2.0; float a=0.16*exp(-r*r*5.0)*(1.0-smoothstep(0.8,1.0,r)); gl_FragColor=vec4(vec3(0.54,0.525,0.64),a);}',
+      vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+      fragmentShader: 'varying vec2 vP; void main(){ vec2 e = vec2(vP.x / 2.0, vP.y / 0.7); float a = 0.2 * exp(-dot(e, e) * 1.1); gl_FragColor = vec4(vec3(0.46,0.44,0.62), a);}',
     });
-    this.shadowCatcher = new Mesh(new PlaneGeometry(14, 14), q.shadows.contactBlob ? this.blobMat : this.shadowMat);
+    this.contactBlob = new Mesh(new PlaneGeometry(14, 14), this.blobMat);
+    this.contactBlob.rotation.x = -Math.PI / 2;
+    this.contactBlob.position.set(0.1, GROUND_Y + 0.002, 0.15);
+    this.contactBlob.renderOrder = -2;
+    this.contactBlob.userData.bloom = 'hide';
+    this.contactBlob.userData.noDepth = true;
+    this.scene.add(this.contactBlob);
+    this.shadowCatcher = new Mesh(new PlaneGeometry(14, 14), this.shadowMat);
     this.shadowCatcher.rotation.x = -Math.PI / 2;
-    this.shadowCatcher.position.y = -1.45;
+    this.shadowCatcher.position.y = GROUND_Y;
     this.shadowCatcher.receiveShadow = true;
     this.shadowCatcher.renderOrder = -1;
     this.shadowCatcher.userData.bloom = 'hide';
+    this.shadowCatcher.userData.noDepth = true;
+    this.shadowCatcher.visible = q.shadows.enabled;
     this.scene.add(this.shadowCatcher);
 
     // TODO: MISSING_FILL(BAKED_LIGHTMAP_ATLAS) MISSING_FILL(BAKED_AO_ATLAS) MISSING_FILL(PRODUCTION_MATERIAL_TEXTURES)
@@ -136,17 +169,15 @@ export class LiveSceneBackend {
     this.lighting.setShadows(q, renderer);
     this.camera = new CameraController(this.path);
 
-    // qStart: eje del cilindro alineado con la arista derecha (BR -> TOP) antes del lanzamiento
-    const br = this.triangle.group.localToWorld((this.triangle.centerline[1] as Vector3).clone());
-    this.qStart.setFromUnitVectors(Y, this.tmpV.subVectors(topWorld, br).normalize());
+    // qStart: el cohete reposa vertical en su cuna (eje del vértice) y se orienta con la trayectoria al separarse.
+    this.qStart.identity();
   }
 
   setQuality(q: QualityConfig): void {
     this.lighting.setShadows(q, this.renderer);
     this.exhaust.rebuild(q);
     this.orbits.rebuild(q);
-    this.shadowCatcher.material = q.shadows.contactBlob ? this.blobMat : this.shadowMat;
-    this.shadowCatcher.visible = true;
+    this.shadowCatcher.visible = q.shadows.enabled;
   }
 
   worldOf = (o: Object3D, v: Vector3, out: Vector3): Vector3 => {
@@ -169,12 +200,15 @@ export class LiveSceneBackend {
     const g = this.cylinder.group;
     g.position.copy(this.headWorld);
     g.quaternion.copy(this.tmpQ);
-    g.scale.setScalar(0.6 + 0.4 * s.cylinderVisibility);
+    g.scale.setScalar(1);
     g.visible = s.cylinderVisibility > 0.001;
     this.cylU.uDissolve!.value = s.cylinderVisibility;
     this.cylU.uNozzle!.value = s.nozzleGlow;
     this.cylU.uAmbient!.value = ambient;
-    this.nozzleWorld.set(0, this.cylinder.nozzleLocalY, 0).applyQuaternion(this.tmpQ).multiplyScalar(g.scale.x).add(this.headWorld);
+    this.storefront.setState(0.72 + 0.28 * s.coreFlash, s.storeEnergy);
+    this.mount.setCharge(Math.min(1.4, s.vertexCharge));
+    this.mount.group.visible = s.triangleReveal > 0.66; // la cuna aparece cuando la viga ya ha llegado al vértice
+    this.nozzleWorld.set(0, this.cylinder.nozzleLocalY, 0).applyQuaternion(this.tmpQ).add(this.headWorld);
 
     // Energía, órbitas, partículas
     this.energy.update(s, this.worldOf, ambient);
@@ -200,6 +234,9 @@ export class LiveSceneBackend {
       m.geometry?.dispose?.();
     });
     this.triangle.dispose();
+    this.storefront.dispose();
+    this.mount.dispose();
+    this.contactBlob.geometry.dispose();
     this.cylinder.dispose();
     this.exhaust.dispose();
     this.orbits.dispose();

@@ -10,20 +10,20 @@ export interface EnergyAnchors {
 
 /** Presupuesto fijo de 4 luces: key (sombras), fill hemisférica, rim y una luz de energía dinámica. */
 export class LightingController {
-  readonly key = new DirectionalLight('#ffffff', 2.2);
-  readonly fill = new HemisphereLight(new Color(PALETTE.violet), new Color(PALETTE.lavender), 0.55);
-  readonly rim = new DirectionalLight(new Color(PALETTE.ice), 1.2);
+  readonly key = new DirectionalLight('#FFFFFF', 2.8);
+  readonly fill = new HemisphereLight(new Color('#E6E2F5'), new Color(PALETTE.lavender), 0.42);
+  readonly rim = new DirectionalLight(new Color(PALETTE.ice), 1.1);
   readonly energy = new PointLight(new Color(PALETTE.cyan), 0, 2.5, 2);
   private tmp = new Vector3();
   private wSum = 0;
 
   constructor(scene: Scene, q: QualityConfig) {
-    this.key.position.set(4, 6, 5);
+    this.key.position.set(-3.5, 5.5, 6); // luz de estudio desde arriba-izquierda: modela los cantos y proyecta sombra fría a la derecha
     this.key.shadow.bias = -0.0002;
     this.key.shadow.normalBias = 0.02;
     const cam = this.key.shadow.camera;
-    cam.left = -4; cam.right = 4; cam.top = 4; cam.bottom = -4; cam.near = 1; cam.far = 20;
-    this.rim.position.set(-5, 3, -4);
+    cam.left = -3.2; cam.right = 3.2; cam.top = 3.2; cam.bottom = -3.2; cam.near = 1; cam.far = 20;
+    this.rim.position.set(5, 2.5, -4);
     scene.add(this.key, this.key.target, this.fill, this.rim, this.energy);
     this.setShadows(q, null);
   }
@@ -49,8 +49,8 @@ export class LightingController {
   /** Posición ponderada y continua entre anclas; la intensidad deriva de StoryState (nunca salta). */
   update(s: StoryState, a: EnergyAnchors, orbitHead: Vector3 | null): void {
     const splitFade = s.splitTravel > 0 && s.splitTravel < 1 ? 1 : 0;
-    const wNeed = s.needSignal * (1 - splitFade) * 0.6;
-    const wCentroid = s.coreFlash * 1.0 + splitFade * 0.4;
+    const wNeed = s.needSignal * (1 - splitFade) * 0.25;
+    const wCentroid = s.coreFlash * 0.55 + splitFade * 0.2;
     const wTop = s.vertexCharge * 0.9 + s.ascent * (1 - s.vertexCharge) * 0.3;
     const wNozzle = s.nozzleGlow * (0.5 + s.exhaustIntensity * 0.5);
     const total = wNeed + wCentroid + wTop + wNozzle;
@@ -64,7 +64,7 @@ export class LightingController {
     this.tmp.addScaledVector(orbitHead ?? a.nozzle, wNozzle);
     this.tmp.divideScalar(total);
     this.energy.position.copy(this.tmp);
-    this.energy.intensity = 6 * Math.min(total, 1.5) * smoothstep(0, 0.15, total);
+    this.energy.intensity = 2.0 * Math.min(total, 1.5) * smoothstep(0, 0.15, total);
   }
 
   get energyLevel(): number {

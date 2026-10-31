@@ -11,19 +11,19 @@ Fuente única: `src/scene/assets/missingFills.ts` (este documento se genera desd
 - **Ubicación prevista:** `public/assets/models/penrose.glb`
 - **Dependencias:** AssetManager, MaterialController
 - **Materiales requeridos:** Cerámica perla + inlay emisivo
-- **Transformaciones compatibles:** Grupo 'TriangleRoot', centroide en origen, circunradio ≈1.386, V_TOP/V_BL/V_BR, perimeterPoint(t)
+- **Transformaciones compatibles:** Grupo 'TriangleRoot', centroide en origen, circunradio ≈1.386, tres vigas ordenadas BL→BR→TOP, cara plana en el vértice superior, perimeterPoint(t)
 - **Componente que sustituye:** createTriangleProxy()
 
 ## MISSING_FILL(STOREFRONT_FINAL_GLB)
 
 - **Uso:** Storefront que se transforma
-- **Escena de destino:** 04
+- **Escena de destino:** 01, 04
 - **Tipo de archivo previsto:** glb
 - **Ubicación prevista:** `public/assets/models/storefront.glb`
-- **Dependencias:** Timeline cap. 4
+- **Dependencias:** Timeline cap. 1 y 4
 - **Materiales requeridos:** PBR de producción
-- **Transformaciones compatibles:** Ancla en el centroide del triángulo
-- **Componente que sustituye:** Pulso de necesidad + destello central
+- **Transformaciones compatibles:** Apoyado en la cara interior de la viga inferior; zona de luz en STORE.doorCenter
+- **Componente que sustituye:** createStorefront() (fachada procedural)
 
 ## MISSING_FILL(CONVEYOR_ASSETS)
 
@@ -67,7 +67,7 @@ Fuente única: `src/scene/assets/missingFills.ts` (este documento se genera desd
 - **Dependencias:** Timeline cap. 5
 - **Materiales requeridos:** PBR + emisión
 - **Transformaciones compatibles:** Base en el vértice superior
-- **Componente que sustituye:** Ascenso de energía + carga del vértice + halo
+- **Componente que sustituye:** createLaunchMount() + ascenso de energía + carga del vértice + halo
 
 ## MISSING_FILL(ROCKET_FINAL_GLB)
 
@@ -77,7 +77,7 @@ Fuente única: `src/scene/assets/missingFills.ts` (este documento se genera desd
 - **Ubicación prevista:** `public/assets/models/rocket.glb`
 - **Dependencias:** LaunchPath, ExhaustSystem
 - **Materiales requeridos:** Cerámica + tobera emisiva
-- **Transformaciones compatibles:** Eje +Y, longitud 0.9, nodo 'Nozzle'
+- **Transformaciones compatibles:** Eje +Y, longitud 1.0, nodo 'Nozzle'
 - **Componente que sustituye:** createCylinderProxy()
 
 ## MISSING_FILL(ORBIT_NODE_MODELS)

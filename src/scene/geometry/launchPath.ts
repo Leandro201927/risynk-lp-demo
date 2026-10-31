@@ -25,17 +25,17 @@ export class LaunchPath {
   readonly lut: DataTexture;
   readonly trailCurve: CatmullRomCurve3;
 
-  constructor(topWorld: Vector3, orbit1: OrbitSpec) {
+  /** `start`: posición del centro del cohete asentado en su cuna (vértice superior). */
+  constructor(start: Vector3, orbit1: OrbitSpec) {
     const curve = new EllipseOrbitCurve(orbit1);
     const uE = THETA_ENTRY / (Math.PI * 2);
     const E = curve.getPoint(((uE % 1) + 1) % 1);
     const tE = curve.getTangent(((uE % 1) + 1) % 1).normalize();
 
-    const start = topWorld.clone().add(new Vector3(0.1, 0.6, 0));
     const A = new CubicBezierCurve3(
-      start,
-      start.clone().add(new Vector3(0.45, 1.5, -0.35)),
-      E.clone().sub(tE.clone().multiplyScalar(1.7)),
+      start.clone(),
+      start.clone().add(new Vector3(0.12, 1.4, -0.1)), // arranque casi vertical: sale de la cuna siguiendo su eje
+      E.clone().sub(tE.clone().multiplyScalar(1.9)),
       E,
     );
     const nA = 240;
@@ -53,11 +53,11 @@ export class LaunchPath {
     const X = this.points[this.idxB] as Vector3;
     const uX = ((thetaX / (Math.PI * 2)) % 1 + 1) % 1;
     const tX = curve.getTangent(uX).normalize();
-    const P3 = X.clone().add(new Vector3(-4.2, 6.2, -2.4));
+    const P3 = X.clone().add(new Vector3(-1.6, 6.4, -3.0)); // escapa hacia arriba y atrás, lejos de la columna de texto
     const C = new CubicBezierCurve3(
       X,
       X.clone().add(tX.clone().multiplyScalar(2.0)),
-      P3.clone().sub(new Vector3(-0.6, 2.4, -0.5)),
+      P3.clone().sub(new Vector3(-0.3, 2.6, -0.8)),
       P3,
     );
     const nC = 240;

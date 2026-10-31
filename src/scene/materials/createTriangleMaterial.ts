@@ -1,21 +1,16 @@
 import { Color, DoubleSide, MeshDepthMaterial, MeshPhysicalMaterial, RGBADepthPacking, ShaderMaterial, Vector2, Vector3, Vector4, type IUniform } from 'three';
 import { LOCALPOS_VERTEX, NOISE3, TRI_ENERGY, TRI_PERIMETER, TRI_UNIFORMS } from './shaderChunks';
-import type { TriangleProxy } from '../geometry/createTriangleProxy';
+import type { TriangleMetrics } from '../geometry/createTriangleProxy';
 
 export const PALETTE = {
-  pearl: '#EAEAF1', cool: '#F6F6FA', lavender: '#C8C5D8', ice: '#BCEEFF', cyan: '#58DDFB', violet: '#E3DDF3',
+  pearl: '#EFEFF4', cool: '#F6F6FA', lavender: '#B9B4D2', ice: '#BCEEFF', cyan: '#58DDFB', violet: '#E3DDF3',
 } as const;
 
 export type TriangleUniforms = Record<string, IUniform>;
 
-export function createTriangleUniforms(tri: Pick<TriangleProxy, 'centerline' | 'halfWidth' | 'depthHalf'>): TriangleUniforms {
-  const [bl, br, top] = tri.centerline;
+/** Uniforms compartidos por las tres vigas (misma instancia de IUniform => una sola actualización por frame). */
+export function createTriangleUniforms(): TriangleUniforms {
   return {
-    uV0: { value: new Vector2(bl.x, bl.y) },
-    uV1: { value: new Vector2(br.x, br.y) },
-    uV2: { value: new Vector2(top.x, top.y) },
-    uHalfW: { value: tri.halfWidth },
-    uDepthHalf: { value: tri.depthHalf },
     uReveal: { value: 1 / 3 },
     uSweep: { value: 0 },
     uEmission: { value: 0 },
@@ -24,61 +19,87 @@ export function createTriangleUniforms(tri: Pick<TriangleProxy, 'centerline' | '
     uVertexCharge: { value: 0 },
     uAmbient: { value: 0 },
     uCyan: { value: new Color(PALETTE.cyan) },
+    uHalfW: { value: 0.15 },
+  };
+}
+
+/** Uniforms de una viga: comparte los globales y añade su arista (índice, origen, dirección, longitud). */
+export function beamUniforms(shared: TriangleUniforms, m: TriangleMetrics, k: number): TriangleUniforms {
+  const b = m.beams[k]!;
+  return {
+    ...shared,
+    uBeamIdx: { value: k },
+    uBStart: { value: new Vector2(b.start.x, b.start.y) },
+    uBDir: { value: new Vector2(b.dir.x, b.dir.y) },
+    uBLen: { value: b.length },
+    uHalfW: { value: m.halfWidth },
   };
 }
 
 const VERT_INJECT = `
 #include <begin_vertex>
-vLocalPos = position;`;
+vLocalPos = position;
+vLocalNormal = normal;`;
 
-/** MeshPhysicalMaterial cerámico con extensión shader (reveal secuencial, inlay emisivo, pulsos). */
+/**
+ * Cerámica nacarada: blanco opaco con velo de nácar (iridiscencia y sheen leves), sombra fría lavanda,
+ * inlay cian hundido en la cara frontal de cada viga y reveal secuencial.
+ */
 export function createTriangleMaterial(u: TriangleUniforms): MeshPhysicalMaterial {
   const m = new MeshPhysicalMaterial({
     color: new Color(PALETTE.pearl),
-    roughness: 0.42,
+    roughness: 0.34,
     metalness: 0,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.18,
-    specularIntensity: 0.6,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.14,
+    specularIntensity: 0.55,
     specularColor: new Color(PALETTE.ice),
-    envMapIntensity: 1.0,
+    sheen: 0.35,
+    sheenRoughness: 0.5,
+    sheenColor: new Color(PALETTE.violet),
+    iridescence: 0.22,
+    iridescenceIOR: 1.25,
+    iridescenceThicknessMinimum: 120,
+    iridescenceThicknessMaximum: 380,
+    envMapIntensity: 0.9,
     side: DoubleSide,
   });
-  m.customProgramCacheKey = () => 'rk-tri-v1';
+  m.customProgramCacheKey = () => 'rk-tri-v2';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
-      .replace('void main() {', `varying vec3 vLocalPos;\nvoid main() {`)
+      .replace('void main() {', `varying vec3 vLocalPos;\nvarying vec3 vLocalNormal;\nvoid main() {`)
       .replace('#include <begin_vertex>', VERT_INJECT);
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', `${TRI_UNIFORMS}\n${TRI_PERIMETER}\n${TRI_ENERGY}\nvoid main() {`)
+      .replace('void main() {', `${TRI_UNIFORMS}\n${TRI_PERIMETER}\n${TRI_ENERGY}\n${NOISE3}\nvoid main() {`)
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-float rkT, rkAcross, rkMask;
+float rkT, rkAcross, rkMask, rkGroove;
 rkPerimeter(vLocalPos.xy, rkT, rkAcross);
-float rkI = rkEnergy(vLocalPos, rkT, rkAcross, rkMask);
+float rkI = rkEnergy(vLocalPos, normalize(vLocalNormal), rkT, rkAcross, rkMask, rkGroove);
 if (uReveal < 0.999 && rkT > uReveal + 0.0005) discard;
-float rkBand = (uReveal < 0.999) ? smoothstep(uReveal - 0.016, uReveal, rkT) : 0.0;
+float rkBand = (uReveal < 0.999) ? smoothstep(uReveal - 0.012, uReveal, rkT) * rkMask : 0.0;
 bool rkBack = !gl_FrontFacing;`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+// Inlay hundido: marco más oscuro y frío alrededor del cian; el interior queda casi negro-cian para que la luz se lea limpia.
+diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.80, 0.80, 0.90), rkGroove * 0.8);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.14, 0.18), rkMask * 0.85);
-if (rkBack) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.65, 0.74), 0.55);`,
+if (rkBack) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.70, 0.70, 0.80), 0.5);`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-roughnessFactor = clamp(roughnessFactor + (rkHashN(vLocalPos * 22.0) - 0.5) * 0.08, 0.04, 1.0);`,
+roughnessFactor = clamp(roughnessFactor + (rkNoise3(vLocalPos * 22.0) - 0.5) * 0.06 - rkMask * 0.2, 0.04, 1.0);`,
       )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-totalEmissiveRadiance += uCyan * (rkI * 1.0 + rkBand * 1.2 + (rkBack ? 0.1 : 0.0));`,
-      )
-      .replace('void main() {', `${NOISE3}\nfloat rkHashN(vec3 p){ return rkNoise3(p); }\nvoid main() {`);
+totalEmissiveRadiance += uCyan * (rkI * 0.9 + rkBand * 0.9);`,
+      );
   };
   return m;
 }
@@ -86,15 +107,14 @@ totalEmissiveRadiance += uCyan * (rkI * 1.0 + rkBand * 1.2 + (rkBack ? 0.1 : 0.0
 /** Profundidad para sombras: respeta el mismo discard del reveal. */
 export function createTriangleDepthMaterial(u: TriangleUniforms): MeshDepthMaterial {
   const m = new MeshDepthMaterial({ depthPacking: RGBADepthPacking });
-  m.customProgramCacheKey = () => 'rk-tri-depth-v1';
+  m.customProgramCacheKey = () => 'rk-tri-depth-v2';
   m.onBeforeCompile = (shader) => {
-    shader.uniforms.uV0 = u.uV0 as IUniform; shader.uniforms.uV1 = u.uV1 as IUniform; shader.uniforms.uV2 = u.uV2 as IUniform;
-    shader.uniforms.uReveal = u.uReveal as IUniform;
+    for (const k of ['uBeamIdx', 'uBStart', 'uBDir', 'uBLen', 'uReveal'] as const) shader.uniforms[k] = u[k] as IUniform;
     shader.vertexShader = shader.vertexShader
       .replace('void main() {', `varying vec3 vLocalPos;\nvoid main() {`)
-      .replace('#include <begin_vertex>', VERT_INJECT);
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocalPos = position;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', `uniform vec2 uV0; uniform vec2 uV1; uniform vec2 uV2; uniform float uReveal; varying vec3 vLocalPos;\n${TRI_PERIMETER}\nvoid main() {`)
+      .replace('void main() {', `uniform float uBeamIdx; uniform vec2 uBStart; uniform vec2 uBDir; uniform float uBLen; uniform float uReveal; varying vec3 vLocalPos;\n${TRI_PERIMETER.replace('float rkCirc(float a, float b) { float d = abs(a - b); return min(d, 1.0 - d); }', '')}\nvoid main() {`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
 { float t, a; rkPerimeter(vLocalPos.xy, t, a); if (uReveal < 0.999 && t > uReveal + 0.0005) discard; }`);
   };
@@ -107,16 +127,16 @@ export function createTriangleBloomMaterial(u: TriangleUniforms): ShaderMaterial
     uniforms: u,
     side: DoubleSide,
     vertexShader: `${LOCALPOS_VERTEX}
-void main() { vLocalPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+varying vec3 vLocalNormal;
+void main() { vLocalPos = position; vLocalNormal = normal; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `${TRI_UNIFORMS}\n${TRI_PERIMETER}\n${TRI_ENERGY}
 void main() {
-  float t, across, mask;
+  float t, across, mask, groove;
   rkPerimeter(vLocalPos.xy, t, across);
-  float I = rkEnergy(vLocalPos, t, across, mask);
+  float I = rkEnergy(vLocalPos, normalize(vLocalNormal), t, across, mask, groove);
   if (uReveal < 0.999 && t > uReveal + 0.0005) discard;
-  float band = (uReveal < 0.999) ? smoothstep(uReveal - 0.016, uReveal, t) : 0.0;
-  float cap = gl_FrontFacing ? 0.0 : 0.1;
-  gl_FragColor = vec4(uCyan * (I + band * 1.2 + cap), 1.0);
+  float band = (uReveal < 0.999) ? smoothstep(uReveal - 0.012, uReveal, t) * mask : 0.0;
+  gl_FragColor = vec4(uCyan * (I * 0.9 + band * 0.9), 1.0);
 }`,
   });
 }

@@ -35,43 +35,41 @@ export class EllipseOrbitCurve extends Curve<Vector3> {
   }
 }
 
-// Entrada del cilindro en el anillo 1 y fracciones del arco B donde nacen las órbitas 2 y 3.
-export const THETA_ENTRY = -0.55;
+// Entrada del cohete en el anillo 1 y fracción del arco B donde nacen las órbitas 2 y 3 (mismo punto de ramificación).
+export const THETA_ENTRY = -0.7;
 export const ARC_B_TURNS = 0.62;
-const BRANCH_FRACTION = { 2: 0.1, 3: 0.3 } as const;
+const BRANCH_FRACTION = 0.12;
+const BRANCH_ANGLE_DEG = 60;
 
 /**
- * Anillo 1 (Visibilidad): relativamente horizontal. Las órbitas 2 y 3 se obtienen girando el plano del anillo 1
- * alrededor del eje que pasa por el punto de ramificación: así se cruzan realmente con la órbita 1 en ese punto,
- * con inclinaciones y formas distintas (no son aros planos ni concéntricos).
+ * Sistema giroscópico de tres elipses idénticas en forma y distintas en plano:
+ *  - Anillo 1 (Visibilidad): relativamente horizontal, ligeramente inclinado hacia la derecha.
+ *  - Anillos 2 y 3 (Relaciones, Resultados): el plano del anillo 1 girado ±60° alrededor del eje que pasa por el
+ *    punto de ramificación. Son imágenes especulares respecto al plano 1: tres planos a 60° entre sí que comparten
+ *    exactamente dos nodos (el punto de ramificación y su antípoda). Sin cruces arbitrarios.
+ * Todas son más grandes que el triángulo (b > circunradio), de modo que el núcleo queda siempre visible y libre.
  */
 export function buildOrbitSpecs(): [OrbitSpec, OrbitSpec, OrbitSpec] {
-  const a = 3.0, b = 2.1;
-  const center = new Vector3(0, 0.35, 0);
-  const q1 = new Quaternion().setFromEuler(new Euler(MathUtils.degToRad(10), 0, MathUtils.degToRad(15), 'XYZ'));
+  const a = 2.4, b = 1.85;
+  const center = new Vector3(0, 0.2, 0);
+  const q1 = new Quaternion().setFromEuler(new Euler(MathUtils.degToRad(12), 0, MathUtils.degToRad(22), 'XYZ'));
   const orbit1: OrbitSpec = {
-    id: 1, name: 'Visibilidad', a, b, quaternion: q1, center, radius: 0.024,
+    id: 1, name: 'Visibilidad', a, b, quaternion: q1, center, radius: 0.021,
     color: [0.16, 0.66, 0.84], intensity: 1.0, speed: 1.0, phase: 0, branchTheta: THETA_ENTRY,
   };
 
-  const derive = (id: 2 | 3, fraction: number, alphaDeg: number, k1: number, color: [number, number, number], radius: number, intensity: number, speed: number): OrbitSpec => {
-    const th = THETA_ENTRY + fraction * ARC_B_TURNS * Math.PI * 2;
-    const local = new Vector3(a * Math.cos(th), 0, b * Math.sin(th));
-    const axis = local.clone().applyQuaternion(q1).normalize();
-    const q = new Quaternion().setFromAxisAngle(axis, MathUtils.degToRad(alphaDeg)).multiply(q1);
-    const ai = a * k1;
-    const c = Math.cos(th) / k1; // (cosθ/k1)² + (sinθ/k2)² = 1  ->  k2 para que el punto pertenezca a la elipse
-    const k2 = Math.abs(Math.sin(th)) / Math.sqrt(Math.max(1e-3, 1 - c * c));
-    return {
-      id, name: id === 2 ? 'Relaciones' : 'Resultados', a: ai, b: b * Math.min(1.35, Math.max(0.8, k2)),
-      quaternion: q, center, radius, color, intensity, speed, phase: id * 0.33, branchTheta: th,
-    };
-  };
+  const th = THETA_ENTRY + BRANCH_FRACTION * ARC_B_TURNS * Math.PI * 2;
+  const axis = new Vector3(a * Math.cos(th), 0, b * Math.sin(th)).applyQuaternion(q1).normalize();
+  const derive = (id: 2 | 3, sign: 1 | -1, color: [number, number, number], radius: number, intensity: number, speed: number): OrbitSpec => ({
+    id, name: id === 2 ? 'Relaciones' : 'Resultados', a, b,
+    quaternion: new Quaternion().setFromAxisAngle(axis, MathUtils.degToRad(BRANCH_ANGLE_DEG * sign)).multiply(q1),
+    center, radius, color, intensity, speed, phase: id * 0.33, branchTheta: th,
+  });
 
   return [
     orbit1,
-    derive(2, BRANCH_FRACTION[2], 62, 0.92, [0.12, 0.64, 0.86], 0.021, 1.0, -0.8),
-    derive(3, BRANCH_FRACTION[3], -48, 1.06, [0.05, 0.6, 0.84], 0.026, 1.3, 0.6),
+    derive(2, 1, [0.12, 0.64, 0.86], 0.018, 0.95, -0.8),
+    derive(3, -1, [0.05, 0.6, 0.84], 0.018, 1.0, 0.6),
   ];
 }
 

@@ -1,5 +1,5 @@
-import { CatmullRomCurve3, PerspectiveCamera, Vector3 } from 'three';
-import { CAMERA_PRESETS, type CameraPreset } from './cameraPresets';
+import { MathUtils, PerspectiveCamera, Vector3 } from 'three';
+import { REF_DESKTOP, REF_MOBILE, SHOTS, TRACK_POSE, type ShotPose } from './cameraPresets';
 import type { StoryState } from '../animation/storyState';
 import type { LaunchPath } from '../geometry/launchPath';
 import { lerp } from '../animation/easing';
@@ -9,46 +9,68 @@ export interface FramingRegion {
   ndcShiftX: number;
   /** Fracción del ancho del canvas disponible para el sujeto (1 = completo). */
   widthFraction: number;
+  /** Fracción del alto ocupada por la barra de navegación fija (el sujeto se centra en el resto). */
+  topInsetFraction: number;
+}
+
+interface Pose {
+  tx: number; ty: number; tz: number;
+  az: number; el: number; logDist: number; fov: number; roll: number; aperture: number;
+}
+
+const D2R = Math.PI / 180;
+
+function toPose(p: ShotPose): Pose {
+  return {
+    tx: p.target[0], ty: p.target[1], tz: p.target[2], az: p.azimuth, el: p.elevation,
+    logDist: Math.log(p.distance), fov: p.fov, roll: p.roll, aperture: p.aperture,
+  };
+}
+
+function mixPose(a: Pose, b: Pose, f: number, out: Pose): Pose {
+  out.tx = lerp(a.tx, b.tx, f); out.ty = lerp(a.ty, b.ty, f); out.tz = lerp(a.tz, b.tz, f);
+  out.az = lerp(a.az, b.az, f); out.el = lerp(a.el, b.el, f);
+  out.logDist = lerp(a.logDist, b.logDist, f); out.fov = lerp(a.fov, b.fov, f);
+  out.roll = lerp(a.roll, b.roll, f); out.aperture = lerp(a.aperture, b.aperture, f);
+  return out;
 }
 
 /**
- * Cámara cinematográfica: spline Catmull-Rom centrípeta (C1) por los presets, seguimiento del cilindro,
- * encuadre responsive por esfera del sujeto y desplazamiento del punto principal (filmOffset).
+ * Cámara cinematográfica.
+ *  1) CINEMATIC FRAMING: poses autoradas por plano (cameraPresets.SHOTS), interpoladas en espacio orbital
+ *     (target lineal, azimut/elevación lineales, distancia en log). Sin spline, sin esfera envolvente genérica.
+ *  2) RESPONSIVE SAFE FRAMING: solo AMPLÍA la distancia cuando el viewport real es más estrecho que el de referencia
+ *     para el que se autoró el plano (relación de semiángulos). Nunca acerca ni redefine el plano.
+ *  3) Punto principal (filmOffset): centra el sujeto en la región libre de texto.
  */
 export class CameraController {
   readonly camera = new PerspectiveCamera(34, 1, 0.1, 100);
-  private posCurve!: CatmullRomCurve3;
-  private tgtCurve!: CatmullRomCurve3;
-  private lensCurve!: CatmullRomCurve3; // x=fov y=aperture z=roll
-  private radiusCurve!: CatmullRomCurve3;
-  private presets: CameraPreset[] = CAMERA_PRESETS;
+  private shots: Pose[] = [];
+  private track!: Pose;
   private mobile = false;
-  region: FramingRegion = { ndcShiftX: 0, widthFraction: 1 };
+  region: FramingRegion = { ndcShiftX: 0, widthFraction: 1, topInsetFraction: 0 };
   focusDistance = 5;
   aperture = 0;
-  private pos = new Vector3();
+  /** Factor responsive aplicado en el último frame (1 = plano autorado intacto). Útil para depuración. */
+  responsiveFactor = 1;
+  private pose: Pose = toPose(SHOTS[0]!.pose);
+  private poseB: Pose = toPose(SHOTS[0]!.pose);
+  private poseT: Pose = toPose(SHOTS[0]!.pose);
   private tgt = new Vector3();
-  private dir = new Vector3();
   private trackTarget = new Vector3();
-  private trackPos = new Vector3();
-  private tmp = new Vector3();
-  private tan = new Vector3();
+  private lagged = new Vector3();
+  private coreTarget = new Vector3();
 
   constructor(private path: LaunchPath) {
     this.camera.filmGauge = 35;
     this.rebuild(false);
   }
 
-  /** Reconstruye las curvas (escritorio vs móvil usan presets distintos, no un recorte). */
+  /** Escritorio y móvil usan composiciones autoradas distintas (no un recorte de la misma). */
   rebuild(mobile: boolean): void {
     this.mobile = mobile;
-    const pick = (p: CameraPreset) => ({ ...p, ...(mobile ? p.mobile : {}) });
-    const ps = this.presets.map(pick);
-    const v = (a: number[]) => new Vector3(a[0], a[1], a[2]);
-    this.posCurve = new CatmullRomCurve3(ps.map((p) => v(p.position)), false, 'centripetal');
-    this.tgtCurve = new CatmullRomCurve3(ps.map((p) => v(p.target)), false, 'centripetal');
-    this.lensCurve = new CatmullRomCurve3(ps.map((p) => new Vector3(p.fov, p.aperture, p.roll)), false, 'centripetal');
-    this.radiusCurve = new CatmullRomCurve3(ps.map((p) => new Vector3(p.subjectRadius, 0, 0)), false, 'centripetal');
+    this.shots = SHOTS.map((s) => toPose({ ...s.pose, ...(mobile ? s.mobile : {}) }));
+    this.track = toPose({ ...TRACK_POSE.desktop, ...(mobile ? TRACK_POSE.mobile : {}) });
   }
 
   get isMobile(): boolean {
@@ -59,51 +81,71 @@ export class CameraController {
     this.camera.aspect = aspect;
   }
 
-  update(s: StoryState, nowSec: number): void {
-    const u = Math.min(7, Math.max(0, s.cameraU)) / 7;
-    // getPoint (no getPointAt): u*7 coincide exactamente con el índice de preset.
-    this.posCurve.getPoint(u, this.pos);
-    this.tgtCurve.getPoint(u, this.tgt);
-    const lens = this.lensCurve.getPoint(u, this.tmp);
-    let fov = lens.x, aperture = lens.y, roll = lens.z;
-    const radius = this.radiusCurve.getPoint(u, new Vector3()).x;
+  /** Semiángulo limitante (el menor entre el vertical y el horizontal de la región) para un FOV dado. */
+  private limitingHalfAngle(fov: number, aspect: number, regionFraction: number, heightFraction: number): number {
+    const vHalf = Math.atan(Math.tan(fov * D2R * 0.5) * heightFraction);
+    const hHalf = Math.atan(Math.tan(fov * D2R * 0.5) * aspect * regionFraction);
+    return Math.max(0.05, Math.min(vHalf, hHalf));
+  }
 
-    // Seguimiento del cilindro (CAM_06): el target se retrasa ligeramente sobre la cabeza.
+  /** RESPONSIVE SAFE FRAMING: factor >= 1 que preserva la fracción de encuadre del plano de referencia. */
+  private responsiveDistanceFactor(fov: number): number {
+    const ref = this.mobile ? REF_MOBILE : REF_DESKTOP;
+    const actual = this.limitingHalfAngle(fov, this.camera.aspect, this.region.widthFraction, 1 - this.region.topInsetFraction);
+    const reference = this.limitingHalfAngle(fov, ref.aspect, ref.regionFraction, ref.heightFraction);
+    return Math.max(1, Math.sin(reference) / Math.sin(actual));
+  }
+
+  update(s: StoryState, nowSec: number): void {
+    const last = this.shots.length - 1;
+    const u = MathUtils.clamp(s.cameraU, 0, last);
+    const i = Math.min(last - 1, Math.floor(u));
+    const f = u - i;
+    const base = mixPose(this.shots[i]!, this.shots[i + 1]!, f, this.poseB);
+
+    let pose = base;
     if (s.cameraTrack > 0.0001) {
+      // Seguimiento del cohete: mismo espacio orbital que los planos, así la mezcla nunca teletransporta.
       const sHead = this.path.qToS(s.cylinderProgress);
-      this.path.pointAt(Math.max(0, sHead - 0.012), this.trackTarget);
-      this.path.tangentAt(sHead, this.tan);
-      const ang = -0.9 * Math.min(1, sHead / this.path.fB);
-      const ox = 2.6, oy = 1.2, oz = 4.4;
-      this.trackPos.set(this.trackTarget.x + ox * Math.cos(ang) + oz * Math.sin(ang), this.trackTarget.y + oy, this.trackTarget.z - ox * Math.sin(ang) + oz * Math.cos(ang));
-      this.pos.lerp(this.trackPos, s.cameraTrack);
-      this.tgt.lerp(this.trackTarget, s.cameraTrack);
-      aperture = lerp(aperture, 0, s.cameraTrack);
+      this.path.pointAt(Math.max(0, sHead - 0.01), this.trackTarget);
+      this.lagged.copy(this.trackTarget).lerp(this.coreTarget.set(...TRACK_POSE.core), TRACK_POSE.coreBias);
+      const t = this.track;
+      this.poseT.tx = this.lagged.x; this.poseT.ty = this.lagged.y; this.poseT.tz = this.lagged.z;
+      this.poseT.az = t.az; this.poseT.el = t.el; this.poseT.logDist = t.logDist;
+      this.poseT.fov = t.fov; this.poseT.roll = t.roll; this.poseT.aperture = t.aperture;
+      pose = mixPose(base, this.poseT, MathUtils.smootherstep(s.cameraTrack, 0, 1), this.pose);
+    } else {
+      Object.assign(this.pose, base);
+      pose = this.pose;
     }
 
-    // Distancia mínima para que la esfera del sujeto quepa en la región de encuadre (responsive, sin clipping).
-    this.dir.subVectors(this.pos, this.tgt);
-    const d0 = this.dir.length();
-    this.dir.divideScalar(Math.max(d0, 1e-5));
-    const vHalf = (fov * Math.PI) / 360;
-    const hHalf = Math.atan(Math.tan(vHalf) * this.camera.aspect * this.region.widthFraction);
-    const need = (radius * (s.cameraTrack > 0.0001 ? 1.0 : 1.0)) / Math.sin(Math.max(0.05, Math.min(vHalf, hHalf)));
-    const dist = Math.max(d0, need) - s.introDolly * 0.25;
-    this.pos.copy(this.tgt).addScaledVector(this.dir, dist);
-    this.pos.y += s.cameraLift * 0.35;
-
-    this.camera.position.copy(this.pos);
-    this.camera.up.set(Math.sin(roll), Math.cos(roll), 0);
-    this.camera.fov = fov;
+    this.responsiveFactor = this.responsiveDistanceFactor(pose.fov);
+    // introDolly: asentamiento mínimo de la entrada de carga (≤ 5 %), basado en tiempo y reversible.
+    const dist = Math.exp(pose.logDist) * this.responsiveFactor * (1 + s.introDolly * 0.05);
+    this.tgt.set(pose.tx, pose.ty, pose.tz);
+    const az = pose.az * D2R, el = pose.el * D2R;
+    const cosEl = Math.cos(el);
+    this.camera.position.set(
+      this.tgt.x + dist * cosEl * Math.sin(az),
+      this.tgt.y + dist * Math.sin(el) + s.cameraLift * 0.12,
+      this.tgt.z + dist * cosEl * Math.cos(az),
+    );
+    this.camera.up.set(Math.sin(pose.roll), Math.cos(pose.roll), 0);
+    this.camera.fov = pose.fov;
     this.camera.lookAt(this.tgt);
 
     // Punto principal: desplaza el sujeto hacia la derecha (región libre de texto) sin recortar el canvas.
+    const vHalf = pose.fov * D2R * 0.5;
     const shift = this.region.ndcShiftX;
     this.camera.filmOffset = -shift * this.camera.aspect * Math.tan(vHalf) * this.camera.getFilmWidth();
+    // Zona segura superior: centra verticalmente el sujeto en el área bajo la barra de navegación.
+    const inset = this.region.topInsetFraction;
+    if (inset > 0.001) this.camera.setViewOffset(1, 1, 0, -inset / 2, 1, 1);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
 
     this.focusDistance = this.camera.position.distanceTo(this.tgt);
-    this.aperture = aperture * s.dofAmount;
+    this.aperture = pose.aperture * s.dofAmount;
     void nowSec;
   }
 }

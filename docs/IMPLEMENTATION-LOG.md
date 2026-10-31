@@ -69,3 +69,23 @@ Ver el informe final de la fase en la conversación; resumen en la tabla de abaj
 - Scoring definitivo, resolución dinámica e histéresis: Fase 3.
 - División de código, texturas, draw calls y revisión de accesibilidad completa: Fase 4.
 - El cielo del "estudio" es un color de fondo calibrado con AgX inverso (`backgroundMatch.ts`); no se ha verificado por píxel en un navegador con GPU.
+
+
+## Revisión de dirección de arte 3D (Fase 1b)
+Corrección de la puesta en escena sin cambiar stack, textos ni capítulos.
+
+**Diagnóstico (causas raíz):**
+- `CameraController` aplicaba `dist = max(d0, radio / sin(semiángulo))`: una protección geométrica genérica sobrescribía el plano artístico. Además, la spline Catmull-Rom por presets cruzaba geometría y cambiaba de escala sin intención.
+- `CAM_01` miraba una arista larga a 1.7 unidades (de ahí la superficie blanca gigante) y no había sujeto reconocible.
+- El triángulo era un marco extruido plano; el cohete, un cilindro que aparecía por ruido en el aire, separado del vértice.
+- El vapor del escape era la capa de partículas más grande.
+
+**Cambios:**
+1. Cámara: planos autorados + interpolación orbital; framing responsive separado (solo amplía; incluye zona segura bajo la barra de navegación).
+2. Escena 01 con fachada procedural dentro de la estructura; el triángulo se revela viga a viga mientras la cámara retrocede.
+3. Triángulo de tres vigas con escalón helicoidal y cerámica nacarada; cuna de lanzamiento en el vértice; cohete con silueta (tobera, cuerpo, ojiva) que se construye sobre la cuna, se enciende y se separa.
+4. Energía narrativa: punto único (03), reparto escalonado desde la fachada (04), convergencia al vértice (05).
+5. Órbitas giroscópicas simétricas; estela fina que se transforma en la primera órbita; partículas pequeñas sin nube.
+6. Sombra de contacto con gaussiana en espacio mundo; planos de suelo fuera de las pasadas de AO/DoF.
+
+**Verificación:** typecheck y build; capturas en 1920×1060, 1440×900, 1100×700 y 390×844 de los seis capítulos y de la transición de lanzamiento; cajas de encuadre proyectadas (`debugBounds`) dentro de la región libre de texto; recorrido ascendente y descendente con diferencia de estado/cámara nula (excepto `introDolly`, canal basado en tiempo).

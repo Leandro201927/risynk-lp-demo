@@ -15,9 +15,9 @@ interface LayerSpec {
 
 // Paleta: núcleo blanco→cian; vapor lavanda/gris frío (legible sobre #f2f2f4); chispas cian→azul hielo.
 const SPEC: Record<Layer, LayerSpec> = {
-  core: { life: [0.35, 0.6], vel: [2.4, 3.2], size: [0.035, 0.09], sizeSkew: 2.2, semi: 0.07, drag: 4.0, radial: 0.02, turb: 0.12, fall: 5.5, alpha: 1.1, colorRate: 1.6, colorA: '#F6F6FA', colorB: '#58DDFB' },
-  vapor: { life: [1.2, 2.8], vel: [0.8, 1.6], size: [0.14, 0.4], sizeSkew: 1.8, semi: 0.26, drag: 2.2, radial: 0.14, turb: 0.5, fall: 2.8, alpha: 0.085, colorRate: 1.0, colorA: '#C2BEDA', colorB: '#DDD8EF' },
-  sparks: { life: [0.4, 1.0], vel: [1.5, 3.5], size: [0.012, 0.035], sizeSkew: 1.5, semi: 0.5, drag: 1.2, radial: 0.05, turb: 0.3, fall: 7.0, alpha: 1.0, colorRate: 1.2, colorA: '#2CC4E8', colorB: '#9BE9FF' },
+  core: { life: [0.25, 0.45], vel: [2.4, 3.2], size: [0.022, 0.06], sizeSkew: 2.4, semi: 0.05, drag: 4.0, radial: 0.02, turb: 0.12, fall: 5.5, alpha: 1.1, colorRate: 1.6, colorA: '#F6F6FA', colorB: '#58DDFB' },
+  vapor: { life: [0.4, 0.9], vel: [0.8, 1.6], size: [0.04, 0.11], sizeSkew: 2.0, semi: 0.12, drag: 3.0, radial: 0.05, turb: 0.3, fall: 3.4, alpha: 0.05, colorRate: 1.0, colorA: '#C2BEDA', colorB: '#DDD8EF' },
+  sparks: { life: [0.45, 1.1], vel: [1.5, 3.2], size: [0.01, 0.026], sizeSkew: 1.6, semi: 0.22, drag: 1.2, radial: 0.05, turb: 0.3, fall: 7.0, alpha: 1.0, colorRate: 1.2, colorA: '#2CC4E8', colorB: '#9BE9FF' },
 };
 
 function mulberry32(seed: number): () => number {

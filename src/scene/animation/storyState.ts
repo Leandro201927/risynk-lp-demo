@@ -6,7 +6,7 @@ export interface StoryState {
   progress: number; // 0..1
   chapter: number; // 0..5 (derivado)
   // Cámara
-  cameraU: number; // 0..7 índice continuo sobre la spline de presets
+  cameraU: number; // 0..6 índice continuo entre los planos de SHOTS (interpolación orbital, sin spline)
   cameraTrack: number; // mezcla preset <-> seguimiento del cilindro
   cameraLift: number;
   dofAmount: number;
@@ -15,9 +15,7 @@ export interface StoryState {
   triangleReveal: number;
   triangleSweep: number;
   triangleEmission: number;
-  edgeLit0: number;
-  edgeLit1: number;
-  edgeLit2: number;
+  edgeLit0: number; // arista inferior iluminada durante la escena 03 (las demás se derivan de splitTravel)
   vertexCharge: number;
   haloWave: number;
   gtaoBlend: number;
@@ -25,6 +23,7 @@ export interface StoryState {
   needSignal: number;
   needTravel: number;
   coreFlash: number;
+  storeEnergy: number; // tinte cian de la zona de luz de la fachada
   splitTravel: number;
   ascent: number;
   returnPulse: number;
@@ -54,8 +53,8 @@ export function createInitialStoryState(): StoryState {
     progress: 0, chapter: 0,
     cameraU: 0, cameraTrack: 0, cameraLift: 0, dofAmount: 1, introDolly: 0,
     triangleReveal: 1 / 3, triangleSweep: 0, triangleEmission: 0,
-    edgeLit0: 0, edgeLit1: 0, edgeLit2: 0, vertexCharge: 0, haloWave: 0, gtaoBlend: 1,
-    needSignal: 0, needTravel: 0, coreFlash: 0, splitTravel: 0, ascent: 0, returnPulse: 0,
+    edgeLit0: 0, vertexCharge: 0, haloWave: 0, gtaoBlend: 0,
+    needSignal: 0, needTravel: 0, coreFlash: 0, storeEnergy: 0, splitTravel: 0, ascent: 0, returnPulse: 0,
     cylinderVisibility: 0, cylinderAlign: 0, cylinderProgress: 0, nozzleGlow: 0,
     exhaustProgress: 0, exhaustIntensity: 0,
     orbitFormation0: 0, orbitFormation1: 0, orbitFormation2: 0, launchTrailFade: 0,

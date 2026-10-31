@@ -28,7 +28,7 @@ bloomComposer (media resolución)           finalComposer (HalfFloat, MSAA×4 en
 
 ## Materiales
 - Triángulo: `MeshPhysicalMaterial` + `onBeforeCompile`. Coordenada de perímetro analítica en fragment (sin atributos), reveal por arista (`discard` + borde luminoso), inlay emisivo oscureciendo el albedo bajo la emisión (evita saturar a blanco), pulsos gaussianos (6 slots), barrido y carga del vértice. `customDepthMaterial` replica el reveal.
-- Cilindro: `MeshPhysicalMaterial` cerámico, disolución por ruido al materializarse, anillo y tobera emisivos.
+- Cohete: perfil de torno procedural (tobera acampanada, cuerpo cilíndrico, ojiva), `MeshPhysicalMaterial` cerámico; se *construye* con un barrido axial de energía desde la tobera hacia la punta mientras reposa en su cuna (`createLaunchMount`). Banda cian e interior de tobera emisivos.
 - Órbitas y estela: `ShaderMaterial` tubular con rango de dibujo circular, fresnel y pulsos sincronizables.
 - Partículas: tres `Points` con `ShaderMaterial` (núcleo aditivo, vapor y chispas premultiplicados), simplex/curl noise por tier.
 - **WebGPU/TSL**: no implementado en Fase 1. `RendererFactory` lo declara y cae a WebGL 2. Los materiales GLSL no se portarán automáticamente: requieren equivalentes TSL (Fase 2).
@@ -47,3 +47,16 @@ Canvas nuevo por montaje (StrictMode), reintentos de inicialización (500 ms, 2 
 
 ## Puntos de integración futuros
 Ver `docs/MISSING-FILLS.md` y los comentarios `TODO: MISSING_FILL(...)`.
+
+
+## Dirección de arte revisada (Fase 1b)
+- **Cámara:** planos autorados (`cameraPresets.ts`) interpolados en espacio orbital; framing responsive separado y solo-ampliador. Detalle en `docs/CAMERA-DIRECTION.md`.
+- **Triángulo:** tres vigas de sección rectangular con inglete y escalón helicoidal en cada unión (cada viga asciende un espesor: solapes cíclicos tipo Penrose, geometría físicamente válida). Cada viga conoce su arista (`uBeamIdx`, `uBStart`, `uBDir`, `uBLen`), de modo que el parámetro de perímetro, el reveal y los pulsos se calculan sin búsqueda de arista cercana. Inlay cian hundido en la cara frontal; el vértice superior se recorta en plano para alojar la cuna de lanzamiento.
+- **Material:** cerámica nacarada opaca (sheen lavanda + iridiscencia leve), luz de estudio desde arriba-izquierda y rim cian-hielo desde atrás-derecha. Exposición 1.3 (el fondo se resuelve con el mismo valor).
+- **Fachada procedural** (`createStorefront`): plinto, volumen, marco de acceso, marquesina y zonas de luz sobre la cara interior de la viga inferior. Es el símbolo del negocio (escena 01) y el nodo central que recibe y reparte la energía (escena 04).
+- **Energía:** un solo punto de necesidad sobre la viga inferior; en la escena 04 llega a la fachada y se reparte de forma escalonada por las tres vigas con líneas de flujo finas; en la escena 05 convergen dos pulsos en el vértice, que carga la cuna.
+- **Órbitas:** tres elipses idénticas en forma y distintas en plano (0° y ±60° alrededor del eje del punto de ramificación): imágenes especulares que comparten dos nodos. Mayores que el triángulo para que el núcleo quede libre.
+- **Partículas:** capa de vapor reducida a una neblina mínima de partículas pequeñas y vida corta; el peso lo llevan núcleo y chispas, concentrados en la trayectoria.
+- **Bloom:** más contenido; el núcleo de los emisores pasa de tinte multiplicativo a aditivo para no virar a azul marino.
+- **Máscara editorial:** el contenedor del canvas se desvanece hacia la columna de texto (`--stage-mask-a/b`, fijados desde `SceneRuntime.resize`).
+- **Pasadas de profundidad:** los planos de suelo y los billboards de luz se excluyen del AO y del DoF (producían rectángulos y estrías).

@@ -1,44 +1,39 @@
 /** Chunks GLSL compartidos entre material principal, material de profundidad y material de máscara de bloom. */
 
 export const TRI_UNIFORMS = /* glsl */ `
-uniform vec2 uV0; uniform vec2 uV1; uniform vec2 uV2;
-uniform float uHalfW; uniform float uDepthHalf;
+uniform float uBeamIdx; uniform vec2 uBStart; uniform vec2 uBDir; uniform float uBLen;
+uniform float uHalfW;
 uniform float uReveal; uniform float uSweep; uniform float uEmission;
 uniform vec3 uEdgeLit; uniform vec4 uPulses[6];
 uniform float uVertexCharge; uniform float uAmbient; uniform vec3 uCyan;
-varying vec3 vLocalPos;
+varying vec3 vLocalPos; varying vec3 vLocalNormal;
 `;
 
+/** Parámetro de perímetro EXACTO por viga: cada mesh conoce su arista (índice, origen, dirección, longitud). */
 export const TRI_PERIMETER = /* glsl */ `
-float rkSeg(vec2 p, vec2 a, vec2 b, out float proj, out float across) {
-  vec2 ab = b - a; float L = length(ab); vec2 d = ab / L;
-  float s = clamp(dot(p - a, d), 0.0, L); proj = s / L;
-  vec2 q = a + d * s; vec2 n = vec2(d.y, -d.x);
-  across = dot(p - a, n);
-  return length(p - q);
-}
 void rkPerimeter(vec2 p, out float t, out float across) {
-  float p0, p1, p2, a0, a1, a2;
-  float d0 = rkSeg(p, uV0, uV1, p0, a0);
-  float d1 = rkSeg(p, uV1, uV2, p1, a1);
-  float d2 = rkSeg(p, uV2, uV0, p2, a2);
-  t = p0 / 3.0; across = a0; float dm = d0;
-  if (d1 < dm) { dm = d1; t = (1.0 + p1) / 3.0; across = a1; }
-  if (d2 < dm) { dm = d2; t = (2.0 + p2) / 3.0; across = a2; }
+  vec2 r = p - uBStart;
+  float e = clamp(dot(r, uBDir) / uBLen, 0.0, 1.0);
+  across = dot(r, vec2(uBDir.y, -uBDir.x));
+  t = (uBeamIdx + e) / 3.0;
 }
 float rkCirc(float a, float b) { float d = abs(a - b); return min(d, 1.0 - d); }
 `;
 
-/** Intensidad emisiva sobre el marco: base + aristas + pulsos + barrido + carga del vértice. */
+/**
+ * Intensidad emisiva: inlay hundido en la cara frontal de cada viga. Base tenue + arista iluminada + pulsos +
+ * barrido + carga del vértice. El máximo está limitado para que el cian nunca queme la cerámica.
+ */
 export const TRI_ENERGY = /* glsl */ `
-float rkEnergy(vec3 lp, float t, float across, out float mask) {
+float rkEnergy(vec3 lp, vec3 ln, float t, float across, out float mask, out float groove) {
   float an = across / uHalfW;
   float fw = max(fwidth(an), 0.002);
-  float band = 1.0 - smoothstep(0.085 - fw, 0.085 + fw, abs(an + 0.78));
-  float front = smoothstep(0.55, 0.85, lp.z / uDepthHalf);
-  mask = band * front;
+  float aa = abs(an);
+  float front = smoothstep(0.8, 0.95, ln.z);
+  mask = (1.0 - smoothstep(0.075 - fw, 0.075 + fw, aa)) * front;
+  groove = (1.0 - smoothstep(0.15 - fw, 0.15 + fw, aa)) * front; // marco del inlay (se oscurece el albedo)
 
-  float e = fract(t * 2.99999); // posición dentro de la arista
+  float e = fract(t * 2.99999);
   int edge = int(floor(t * 2.99999));
   float lit = edge == 0 ? uEdgeLit.x : (edge == 1 ? uEdgeLit.y : uEdgeLit.z);
   float litMask = (1.0 - smoothstep(lit * 0.5 - 0.03, lit * 0.5 + 0.03, abs(e - 0.5))) * smoothstep(0.0, 0.02, lit);
@@ -50,13 +45,14 @@ float rkEnergy(vec3 lp, float t, float across, out float mask) {
     pulse += pu.z * exp(-(d * d) / (pu.y * pu.y));
   }
   float sweepPos = uSweep * 1.12 - 0.06;
-  float sw = exp(-pow((t - sweepPos) / 0.05, 2.0)) * step(0.0001, uSweep) * (1.0 - smoothstep(0.93, 1.0, uSweep));
+  float sw = exp(-pow((t - sweepPos) / 0.04, 2.0)) * step(0.0001, uSweep) * (1.0 - smoothstep(0.93, 1.0, uSweep));
   float dTop = rkCirc(t, 2.0 / 3.0);
-  float vc = uVertexCharge * exp(-(dTop * dTop) / 0.0045);
+  float vc = uVertexCharge * exp(-(dTop * dTop) / 0.0035);
 
-  float line = (uEmission + litMask * 0.9 + sw * 2.0 + vc * 1.6) * mask;
-  float spill = (pulse + sw * 0.4 + vc * 0.5) * (mask * 1.0 + 0.1 * front * (1.0 - mask));
-  return min(2.4, line + spill);
+  float line = (uEmission + litMask * 0.7 + sw * 1.5 + vc * 1.2) * mask;
+  // La luz se derrama muy poco sobre la cerámica vecina: localizada en el inlay.
+  float spill = (pulse + sw * 0.25 + vc * 0.35) * (mask + 0.07 * groove * (1.0 - mask));
+  return min(1.8, line + spill);
 }
 `;
 
@@ -102,7 +98,7 @@ void main() {
     float core = exp(-r * r * 22.0);
     float halo = exp(-r * r * 4.5);
     a = clamp(core + halo * 0.55, 0.0, 1.0);
-    col = mix(uColor, vec3(1.0), core);
+    col = mix(uColor, vec3(1.0), core * 0.4);
   }
   a *= uIntensity;
   gl_FragColor = vec4(col * 1.25, a);

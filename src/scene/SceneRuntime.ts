@@ -1,4 +1,4 @@
-import type { WebGLRenderer } from 'three';
+import { Mesh, Vector3, type Object3D, type WebGLRenderer } from 'three';
 import { hashState, type StoryState } from './animation/storyState';
 import { LiveSceneBackend } from './createScene';
 import { createRenderer, selectBackend } from './RendererFactory';
@@ -157,15 +157,23 @@ export class SceneRuntime {
     this.backend.drawingBufferHeight = h * dpr;
     const cam = this.backend.camera;
     cam.setAspect(w / h);
+    const nav = document.querySelector<HTMLElement>('.nav');
+    const topInsetFraction = nav ? Math.min(0.25, Math.max(0, nav.getBoundingClientRect().bottom) / h) : 0;
     const mobile = window.innerWidth < 768;
     if (mobile !== cam.isMobile) cam.rebuild(mobile);
-    if (mobile) cam.region = { ndcShiftX: 0, widthFraction: 1 };
-    else {
+    if (mobile) {
+      cam.region = { ndcShiftX: 0, widthFraction: 1, topInsetFraction };
+      this.container.style.removeProperty('--stage-mask-a');
+      this.container.style.removeProperty('--stage-mask-b');
+    } else {
       const panel = document.querySelector<HTMLElement>('.stage-info__col .chapter');
       const right = panel ? panel.getBoundingClientRect().right : w * 0.4;
       const left = Math.min(w * 0.7, right + 50);
       const cx = (left + w) / 2;
-      cam.region = { ndcShiftX: (2 * cx) / w - 1, widthFraction: (w - left) / w };
+      cam.region = { ndcShiftX: (2 * cx) / w - 1, widthFraction: (w - left) / w, topInsetFraction };
+      // Máscara editorial: el canvas se desvanece hacia la columna de texto (nada dibujado puede restar legibilidad).
+      this.container.style.setProperty('--stage-mask-a', `${Math.max(0, right - 30)}px`);
+      this.container.style.setProperty('--stage-mask-b', `${Math.max(40, left - 10)}px`);
     }
     this.forceRender = true;
   }
@@ -241,6 +249,47 @@ export class SceneRuntime {
   /** Fija el progreso y fuerza un render (solo depuración y verificación). */
   getDebug(): RuntimeDebug {
     return { tier: this.tier, backend: 'webgl2', caps: this.caps, perf: this.evaluator.snapshot, config: this.config, frames: this.frames };
+  }
+
+  /**
+   * Verificación de encuadre: proyecta los vértices reales de cada elemento a píxeles CSS del contenedor.
+   * Solo depuración (?debug); no interviene en el render.
+   */
+  debugBounds(): { w: number; h: number; regionLeft: number; items: Record<string, { x0: number; y0: number; x1: number; y1: number }> } {
+    const w = this.container.clientWidth, h = this.container.clientHeight;
+    const cam = this.backend.camera.camera;
+    cam.updateMatrixWorld(true);
+    const v = new Vector3();
+    const rectOf = (objs: Object3D[], filter?: (m: Mesh) => boolean): { x0: number; y0: number; x1: number; y1: number } | null => {
+      const r = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      let any = false;
+      for (const o of objs) {
+        o.updateWorldMatrix(true, true);
+        o.traverse((n) => {
+          const m = n as Mesh;
+          if (!m.isMesh || !m.visible || (filter && !filter(m))) return;
+          const pos = m.geometry.attributes.position;
+          if (!pos) return;
+          const step = Math.max(1, Math.floor(pos.count / 4000));
+          for (let i = 0; i < pos.count; i += step) {
+            v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).project(cam);
+            const x = (v.x * 0.5 + 0.5) * w, y = (1 - (v.y * 0.5 + 0.5)) * h;
+            r.x0 = Math.min(r.x0, x); r.x1 = Math.max(r.x1, x); r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y);
+            any = true;
+          }
+        });
+      }
+      return any ? r : null;
+    };
+    const b = this.backend;
+    const items: Record<string, { x0: number; y0: number; x1: number; y1: number }> = {};
+    const add = (k: string, r: ReturnType<typeof rectOf>): void => { if (r) items[k] = r; };
+    add('triangle', rectOf([b.triangle.group], (m) => m.name.startsWith('TriangleBeam')));
+    add('storefront', rectOf([b.storefront.group]));
+    add('rocket', b.cylinder.group.visible ? rectOf([b.cylinder.group]) : null);
+    add('orbits', rectOf([b.orbits.root], (m) => m.name.startsWith('Orbit_')));
+    const left = w * (1 - b.camera.region.widthFraction);
+    return { w, h, regionLeft: left, items };
   }
 
   get backendRef(): LiveSceneBackend {
