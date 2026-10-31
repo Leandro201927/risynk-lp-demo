@@ -143,8 +143,11 @@ export class CameraController {
     this.camera.filmOffset = -shift * this.camera.aspect * Math.tan(vHalf) * this.camera.getFilmWidth();
     // Zona segura superior: centra verticalmente el sujeto en el área bajo la barra de navegación.
     const inset = this.region.topInsetFraction;
-    if (inset > 0.001) this.camera.setViewOffset(1, 1, 0, -inset / 2, 1, 1);
+    // setViewOffset fija aspect = fullWidth/fullHeight: se pasan dimensiones con la proporción REAL (con 1×1 la escena se estiraba).
+    const A = this.camera.aspect, H = 1000;
+    if (inset > 0.001) this.camera.setViewOffset(A * H, H, 0, (-inset / 2) * H, A * H, H);
     else this.camera.clearViewOffset();
+    this.camera.aspect = A;
     this.camera.updateProjectionMatrix();
 
     this.focusDistance = this.camera.position.distanceTo(this.tgt);

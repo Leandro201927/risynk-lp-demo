@@ -8,7 +8,6 @@ import { Q_A, Q_B, type LaunchPath } from '../geometry/launchPath';
 import { clamp01, lerp, smoothstep } from '../animation/easing';
 import type { QualityConfig } from '../quality/qualityProfiles';
 import type { ShaderMaterial } from 'three';
-import { INTEGRATIONS_BY_ORBIT, IntegrationTokenFactory, type IntegrationToken } from './createIntegrationTokens';
 
 const TAU = Math.PI * 2;
 const wrap01 = (x: number): number => ((x % 1) + 1) % 1;
@@ -40,7 +39,6 @@ export class OrbitController {
   private trail!: Mesh;
   private trailMaterial!: ShaderMaterial;
   private curves: EllipseOrbitCurve[] = [];
-  private factory = new IntegrationTokenFactory();
   private connectU: Array<[number, number]> = [[0.1, 0.5], [0.1, 0.5], [0.1, 0.5]];
 
   constructor(private path: LaunchPath, q: QualityConfig, triangleVerticesWorld: Vector3[]) {
@@ -198,6 +196,5 @@ export class OrbitController {
 
   dispose(): void {
     this.disposeMeshes();
-    this.factory.dispose();
   }
 }
