@@ -28,17 +28,28 @@ export function Story({ onChapter, onFatal }: Props) {
 
   // Indicador: sale (slide + fade) hacia el lado del cambio, se recoloca invisible y entra desde el lado opuesto.
   useEffect(() => {
-    if (targetSide === railSide) return;
+    if (targetSide === railSide || railPhase !== 'in') return;
     setRailDir(targetSide === 'right' ? 1 : -1);
     setRailPhase('out');
-    let raf = 0;
+  }, [targetSide, railSide, railPhase]);
+
+  // Fase 'out' terminada: cambia de lado (invisible).
+  useEffect(() => {
+    if (railPhase !== 'out') return;
     const t = window.setTimeout(() => {
       setRailSide(targetSide);
       setRailPhase('pre');
-      raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => setRailPhase('in')); });
     }, 380);
-    return () => { clearTimeout(t); cancelAnimationFrame(raf); };
-  }, [targetSide, railSide]);
+    return () => clearTimeout(t);
+  }, [railPhase, targetSide]);
+
+  // Fase 'pre': tras pintar en la nueva posición, entra. Si el capítulo cambió mientras tanto, el primer efecto reencadena.
+  useEffect(() => {
+    if (railPhase !== 'pre') return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setRailPhase('in')); });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [railPhase]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
