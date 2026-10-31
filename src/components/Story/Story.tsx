@@ -6,7 +6,7 @@ import { ChapterRail } from './ChapterRail';
 import { SceneCanvas } from '../../scene/SceneCanvas';
 import { createInitialStoryState } from '../../scene/animation/storyState';
 import { createStoryTimeline } from '../../scene/animation/storyTimeline';
-import { READING_ANCHORS } from '../../scene/animation/storyChapters';
+import { CHAPTER_SIDES, READING_ANCHORS } from '../../scene/animation/storyChapters';
 import { DebugHud } from '../../scene/debug/DebugHud';
 
 interface Props {
@@ -67,7 +67,7 @@ export function Story({ onChapter, onFatal }: Props) {
           <SceneCanvas state={stateRef.current} onFatal={onFatal} />
         </div>
         <div className="stage-info">
-          <div className="stage-info__col">
+          <div className={`stage-info__col${CHAPTER_SIDES[chapter] === 1 ? ' is-right' : ''}`}>
             {CHAPTERS.map((c, i) => (
               <ChapterPanel key={c.id} chapter={c} index={i} setRef={(el) => { panelRefs.current[i] = el; }} />
             ))}

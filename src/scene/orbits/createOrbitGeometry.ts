@@ -50,7 +50,7 @@ const BRANCH_ANGLE_DEG = 60;
  * Todas son más grandes que el triángulo (b > circunradio), de modo que el núcleo queda siempre visible y libre.
  */
 export function buildOrbitSpecs(): [OrbitSpec, OrbitSpec, OrbitSpec] {
-  const a = 2.4, b = 1.85;
+  const a = 2.2, b = 1.95;
   const center = new Vector3(0, 0.2, 0);
   const q1 = new Quaternion().setFromEuler(new Euler(MathUtils.degToRad(12), 0, MathUtils.degToRad(22), 'XYZ'));
   const orbit1: OrbitSpec = {

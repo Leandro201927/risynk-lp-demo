@@ -1,4 +1,5 @@
-import { Group, Mesh, TubeGeometry, Vector2, Vector3 } from 'three';
+import { CircleGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, TubeGeometry, Vector2, Vector3 } from 'three';
+import { LOGO_COUNT, createLogoTexture } from './createLogoTextures';
 import type { StoryState } from '../animation/storyState';
 import { ORBIT_PHASE_FINAL } from '../animation/storyState';
 import { ARC_B_TURNS, EllipseOrbitCurve, THETA_ENTRY, buildOrbitSpecs, createOrbitTube, type OrbitSpec } from './createOrbitGeometry';
@@ -7,6 +8,7 @@ import { Q_A, Q_B, type LaunchPath } from '../geometry/launchPath';
 import { clamp01, lerp, smoothstep } from '../animation/easing';
 import type { QualityConfig } from '../quality/qualityProfiles';
 import type { ShaderMaterial } from 'three';
+import { INTEGRATIONS_BY_ORBIT, IntegrationTokenFactory, type IntegrationToken } from './createIntegrationTokens';
 
 const TAU = Math.PI * 2;
 const wrap01 = (x: number): number => ((x % 1) + 1) % 1;
@@ -17,7 +19,18 @@ interface OrbitItem {
   mesh: Mesh;
   material: ShaderMaterial;
   branchU: number;
+  logos: LogoItem[];
 }
+
+interface LogoItem {
+  mesh: Mesh;
+  u: number; // posición base sobre la órbita (0..1)
+  drift: number; // desplazamiento angular por segundo (fracción de vuelta)
+  spin: number; // giro sobre su propio eje (rad/s)
+}
+
+const LOGOS_PER_ORBIT = 3;
+const LOGO_SIZE = 0.34;
 
 /** Anillos 3D (Visibilidad / Relaciones / Resultados) + tubo de la estela de lanzamiento. Todo determinista. */
 export class OrbitController {
@@ -26,6 +39,8 @@ export class OrbitController {
   private items: OrbitItem[] = [];
   private trail!: Mesh;
   private trailMaterial!: ShaderMaterial;
+  private curves: EllipseOrbitCurve[] = [];
+  private factory = new IntegrationTokenFactory();
   private connectU: Array<[number, number]> = [[0.1, 0.5], [0.1, 0.5], [0.1, 0.5]];
 
   constructor(private path: LaunchPath, q: QualityConfig, triangleVerticesWorld: Vector3[]) {
@@ -36,6 +51,7 @@ export class OrbitController {
 
   private build(q: QualityConfig): void {
     // TODO: MISSING_FILL(ORBIT_NODE_MODELS) — los nodos se posicionarán por el parámetro u de cada órbita (sin cubos ni marcadores en el piloto).
+    this.curves = this.specs.map((sp) => new EllipseOrbitCurve(sp));
     for (const spec of this.specs) {
       const material = createOrbitMaterial(spec, true);
       const mesh = new Mesh(createOrbitTube(spec, q.geometry.orbitTubular, q.geometry.orbitRadial), material);
@@ -44,8 +60,19 @@ export class OrbitController {
       mesh.name = `Orbit_${spec.name}`;
       const group = new Group();
       group.add(mesh);
+      const logos: LogoItem[] = [];
+      for (let k = 0; k < LOGOS_PER_ORBIT; k++) {
+        const idx = (spec.id - 1) * LOGOS_PER_ORBIT + k;
+        const mat = new MeshBasicMaterial({ map: createLogoTexture(idx % LOGO_COUNT), transparent: true, side: DoubleSide, toneMapped: false, depthWrite: false });
+        const logo = new Mesh(new CircleGeometry(LOGO_SIZE / 2, 48), mat);
+        logo.frustumCulled = false;
+        logo.visible = false;
+        logo.name = `Logo_${spec.name}_${k}`;
+        group.add(logo);
+        logos.push({ mesh: logo, u: (k + spec.phase) / LOGOS_PER_ORBIT, drift: 0.012 * Math.sign(spec.speed || 1), spin: 1.4 + 0.3 * k });
+      }
       this.root.add(group);
-      this.items.push({ spec, group, mesh, material, branchU: wrap01(spec.branchTheta / TAU) });
+      this.items.push({ spec, group, mesh, material, branchU: wrap01(spec.branchTheta / TAU), logos });
     }
     this.trailMaterial = createOrbitMaterial(null, false);
     this.trail = new Mesh(new TubeGeometry(this.path.trailCurve, 180, 0.012, 8, false), this.trailMaterial);
@@ -124,6 +151,17 @@ export class OrbitController {
       (m.uConnectU!.value as Vector2).set((this.connectU[i] as [number, number])[0], (this.connectU[i] as [number, number])[1]);
       m.uAmbient!.value = ambient;
       it.mesh.visible = (m.uMaster!.value as number) > 0.001;
+
+      // Logos de integraciones: viajan sobre la órbita ya dibujada y giran sobre su propio eje.
+      const appear = smoothstep(0.75, 1, formation[i] as number) * clamp01(s.orbitIntensity * 1.5 + (i > 0 ? 1 : 0));
+      for (const lg of it.logos) {
+        lg.mesh.visible = appear > 0.01;
+        if (!lg.mesh.visible) continue;
+        this.curves[i]!.getPoint(wrap01(lg.u + lg.drift * ambient), lg.mesh.position);
+        lg.mesh.rotation.set(0, ambient * lg.spin, 0);
+        lg.mesh.scale.setScalar(0.4 + 0.6 * appear);
+        (lg.mesh.material as MeshBasicMaterial).opacity = appear;
+      }
     });
 
     // Tubo de estela del tramo A
@@ -145,6 +183,12 @@ export class OrbitController {
       this.root.remove(it.group);
       it.mesh.geometry.dispose();
       it.material.dispose();
+      for (const lg of it.logos) {
+        lg.mesh.geometry.dispose();
+        const mat = lg.mesh.material as MeshBasicMaterial;
+        mat.map?.dispose();
+        mat.dispose();
+      }
     }
     this.items = [];
     this.root.remove(this.trail);
@@ -154,5 +198,6 @@ export class OrbitController {
 
   dispose(): void {
     this.disposeMeshes();
+    this.factory.dispose();
   }
 }

@@ -1,6 +1,6 @@
 import type { ChapterContent } from '../../content/storyContent';
 import { ContactCTA } from '../ContactCTA/ContactCTA';
-import { scrollToChapter } from '../../scene/animation/storyChapters';
+import { CHAPTER_SIDES, scrollToChapter } from '../../scene/animation/storyChapters';
 
 interface Props {
   chapter: ChapterContent;
@@ -15,7 +15,7 @@ export function ChapterPanel({ chapter, index, innerStatic = false, setRef }: Pr
   return (
     <section
       ref={setRef}
-      className={`chapter${index === 0 ? ' chapter--first' : ''}`}
+      className={`chapter${index === 0 ? ' chapter--first' : ''}${CHAPTER_SIDES[index] === 1 && !innerStatic ? ' chapter--right' : ''}`}
       aria-labelledby={`ch-${chapter.id}`}
       data-chapter={index}
     >

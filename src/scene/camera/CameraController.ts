@@ -51,6 +51,8 @@ export class CameraController {
   region: FramingRegion = { ndcShiftX: 0, widthFraction: 1, topInsetFraction: 0 };
   focusDistance = 5;
   aperture = 0;
+  /** 0 = escena a la derecha, 1 = escena a la izquierda (transición suave entre capítulos). */
+  layoutMix = 0;
   /** Factor responsive aplicado en el último frame (1 = plano autorado intacto). Útil para depuración. */
   responsiveFactor = 1;
   private pose: Pose = toPose(SHOTS[0]!.pose);
@@ -123,7 +125,8 @@ export class CameraController {
     // introDolly: asentamiento mínimo de la entrada de carga (≤ 5 %), basado en tiempo y reversible.
     const dist = Math.exp(pose.logDist) * this.responsiveFactor * (1 + s.introDolly * 0.05);
     this.tgt.set(pose.tx, pose.ty, pose.tz);
-    const az = pose.az * D2R, el = pose.el * D2R;
+    // Al cambiar de lado la cámara también se refleja: la escena gira hacia el texto.
+    const az = pose.az * (1 - 2 * this.layoutMix) * D2R, el = pose.el * D2R;
     const cosEl = Math.cos(el);
     this.camera.position.set(
       this.tgt.x + dist * cosEl * Math.sin(az),

@@ -1,3 +1,4 @@
+import { CHAPTER_SIDES } from './animation/storyChapters';
 import { Mesh, Vector3, type Object3D, type WebGLRenderer } from 'three';
 import { hashState, type StoryState } from './animation/storyState';
 import { LiveSceneBackend } from './createScene';
@@ -163,18 +164,65 @@ export class SceneRuntime {
     if (mobile !== cam.isMobile) cam.rebuild(mobile);
     if (mobile) {
       cam.region = { ndcShiftX: 0, widthFraction: 1, topInsetFraction };
+      cam.layoutMix = 0;
+      this.desktopLayout = false;
+      this.layoutMix = 0;
       this.container.style.removeProperty('--stage-mask-a');
       this.container.style.removeProperty('--stage-mask-b');
+      this.container.style.removeProperty('--stage-mask-c');
+      this.container.style.removeProperty('--stage-mask-d');
     } else {
       const panel = document.querySelector<HTMLElement>('.stage-info__col .chapter');
-      const right = panel ? panel.getBoundingClientRect().right : w * 0.4;
-      const left = Math.min(w * 0.7, right + 50);
-      const cx = (left + w) / 2;
-      cam.region = { ndcShiftX: (2 * cx) / w - 1, widthFraction: (w - left) / w, topInsetFraction };
-      // Máscara editorial: el canvas se desvanece hacia la columna de texto (nada dibujado puede restar legibilidad).
-      this.container.style.setProperty('--stage-mask-a', `${Math.max(0, right - 30)}px`);
-      this.container.style.setProperty('--stage-mask-b', `${Math.max(40, left - 10)}px`);
+      const col = document.querySelector<HTMLElement>('.stage-info__col');
+      const panelW = panel ? panel.getBoundingClientRect().width : w * 0.38;
+      const colRect = col ? col.getBoundingClientRect() : { left: 0, right: w };
+      // Región libre de la escena para cada lado del contenido.
+      this.regionA = { left: Math.min(w * 0.7, colRect.left + panelW + 50), right: w }; // texto a la izquierda
+      this.regionB = { left: 0, right: Math.max(w * 0.3, colRect.right - panelW - 50) }; // texto a la derecha
+      this.topInsetFraction = topInsetFraction;
+      this.desktopLayout = true;
+      this.applyLayout();
     }
+    this.forceRender = true;
+  }
+
+  private regionA = { left: 0, right: 0 };
+  private regionB = { left: 0, right: 0 };
+  private topInsetFraction = 0;
+  private desktopLayout = false;
+  private layoutMix = 0;
+  private layoutLast = 0;
+
+  /** Interpola la región libre entre ambos lados y actualiza el punto principal y la máscara editorial. */
+  private applyLayout(): void {
+    if (!this.desktopLayout) return;
+    const w = this.container.clientWidth || window.innerWidth;
+    const m = this.layoutMix;
+    const L = this.regionA.left + (this.regionB.left - this.regionA.left) * m;
+    const R = this.regionA.right + (this.regionB.right - this.regionA.right) * m;
+    const cam = this.backend.camera;
+    cam.layoutMix = m;
+    cam.region = { ndcShiftX: (L + R) / w - 1, widthFraction: (R - L) / w, topInsetFraction: this.topInsetFraction };
+    const st = this.container.style;
+    st.setProperty('--stage-mask-a', `${L - 80}px`);
+    st.setProperty('--stage-mask-b', `${L - 10}px`);
+    st.setProperty('--stage-mask-c', `${R + 10}px`);
+    st.setProperty('--stage-mask-d', `${R + 80}px`);
+  }
+
+  /** Transición temporal (independiente del scroll) hacia el lado del capítulo activo. */
+  private stepLayout(t: number): void {
+    if (!this.desktopLayout) return;
+    const dt = Math.min(0.1, Math.max(0, (t - this.layoutLast) / 1000));
+    this.layoutLast = t;
+    const target = CHAPTER_SIDES[Math.min(CHAPTER_SIDES.length - 1, Math.max(0, this.state.chapter))] as number;
+    const diff = target - this.layoutMix;
+    if (Math.abs(diff) < 0.0005) {
+      if (this.layoutMix !== target) { this.layoutMix = target; this.applyLayout(); this.forceRender = true; }
+      return;
+    }
+    this.layoutMix += diff * (1 - Math.exp(-dt * 3.2));
+    this.applyLayout();
     this.forceRender = true;
   }
 
@@ -195,6 +243,7 @@ export class SceneRuntime {
     if (!this.running || this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
     const s = this.state;
+    this.stepLayout(t);
     const hash = hashState(s);
     const dirty = hash !== this.lastHash || this.forceRender;
     if (!dirty) {

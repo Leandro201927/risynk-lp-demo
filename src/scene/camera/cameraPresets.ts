@@ -114,7 +114,7 @@ export const SHOTS: Shot[] = [
     margins: 'Órbitas ≥ 6 % de margen.',
     entry: 'Salida del seguimiento (81–88 %).', exit: 'Asentamiento final.',
     readingTime: '88–94 %.',
-    pose: P([0, 0.2, 0], 20, 14, 10.3),
+    pose: P([0, 0.2, 0], 20, 14, 9.6),
     mobile: { distance: 10.7 },
   },
   {
@@ -125,7 +125,7 @@ export const SHOTS: Shot[] = [
     margins: 'Igual que SHOT_06A.',
     entry: 'Orbitación mínima (94–99 %).', exit: 'Final del scroll.',
     readingTime: '99–100 %.',
-    pose: P([0, 0.2, 0], 25, 16, 10.0),
+    pose: P([0, 0.2, 0], 25, 16, 9.4),
     mobile: { distance: 10.4 },
   },
 ];

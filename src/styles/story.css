@@ -5,8 +5,8 @@
 .stage-canvas__host {
   position: absolute; inset: 0;
   /* Máscara editorial: la escena se desvanece antes de la columna de texto (valores fijados por SceneRuntime). */
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent var(--stage-mask-a, 28%), #000 var(--stage-mask-b, 40%));
-  mask-image: linear-gradient(90deg, transparent 0, transparent var(--stage-mask-a, 28%), #000 var(--stage-mask-b, 40%));
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent var(--stage-mask-a, 28%), #000 var(--stage-mask-b, 40%), #000 var(--stage-mask-c, 100%), transparent var(--stage-mask-d, 100%));
+  mask-image: linear-gradient(90deg, transparent 0, transparent var(--stage-mask-a, 28%), #000 var(--stage-mask-b, 40%), #000 var(--stage-mask-c, 100%), transparent var(--stage-mask-d, 100%));
 }
 .stage-canvas canvas { display: block; width: 100%; height: 100%; }
 .stage-fallback { position: absolute; inset: 0; display: none; }
@@ -44,6 +44,12 @@
 .rail__btn:hover { border-color: var(--color-signal-blue); color: var(--color-off-black); }
 .rail__bar { position: absolute; left: 0; right: 0; bottom: -14px; height: var(--hairline-strong); background: var(--line); }
 .rail__bar > i { position: absolute; inset: 0; background: var(--color-off-black); transform-origin: left; transform: scaleX(0); }
+
+@media (min-width: 768px) {
+  .chapter--right { left: auto; right: 0; }
+  .rail { transition: left 0.9s cubic-bezier(0.22, 1, 0.36, 1), transform 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+  .stage-info__col.is-right .rail { left: 100%; transform: translateX(-100%); }
+}
 
 /* Fallback estático (sin WebGL 2): capítulos en flujo normal */
 .static-page { padding: 140px var(--space-22) var(--space-94); max-width: var(--content-max); margin: 0 auto; display: grid; gap: var(--editorial-gap); }
