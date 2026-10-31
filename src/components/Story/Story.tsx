@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { CHAPTERS } from '../../content/storyContent';
 import { ChapterPanel } from '../ChapterPanel/ChapterPanel';
@@ -21,6 +21,24 @@ export function Story({ onChapter, onFatal }: Props) {
   const panelRefs = useRef<Array<HTMLElement | null>>([]);
   const stateRef = useRef(createInitialStoryState());
   const [chapter, setChapter] = useState(0);
+  const targetSide: 'left' | 'right' = CHAPTER_SIDES[chapter] === 1 ? 'right' : 'left';
+  const [railSide, setRailSide] = useState<'left' | 'right'>('left');
+  const [railPhase, setRailPhase] = useState<'in' | 'out' | 'pre'>('in');
+  const [railDir, setRailDir] = useState<1 | -1>(1);
+
+  // Indicador: sale (slide + fade) hacia el lado del cambio, se recoloca invisible y entra desde el lado opuesto.
+  useEffect(() => {
+    if (targetSide === railSide) return;
+    setRailDir(targetSide === 'right' ? 1 : -1);
+    setRailPhase('out');
+    let raf = 0;
+    const t = window.setTimeout(() => {
+      setRailSide(targetSide);
+      setRailPhase('pre');
+      raf = requestAnimationFrame(() => { raf = requestAnimationFrame(() => setRailPhase('in')); });
+    }, 380);
+    return () => { clearTimeout(t); cancelAnimationFrame(raf); };
+  }, [targetSide, railSide]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -67,11 +85,11 @@ export function Story({ onChapter, onFatal }: Props) {
           <SceneCanvas state={stateRef.current} onFatal={onFatal} />
         </div>
         <div className="stage-info">
-          <div className={`stage-info__col${CHAPTER_SIDES[chapter] === 1 ? ' is-right' : ''}`}>
+          <div className="stage-info__col">
             {CHAPTERS.map((c, i) => (
               <ChapterPanel key={c.id} chapter={c} index={i} setRef={(el) => { panelRefs.current[i] = el; }} />
             ))}
-            <ChapterRail chapter={chapter} barRef={barRef} />
+            <ChapterRail chapter={chapter} barRef={barRef} side={railSide} phase={railPhase} dir={railDir} />
           </div>
         </div>
         <DebugHud state={stateRef.current} />

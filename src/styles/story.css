@@ -47,8 +47,11 @@
 
 @media (min-width: 768px) {
   .chapter--right { left: auto; right: 0; }
-  .rail { transition: left 0.9s cubic-bezier(0.22, 1, 0.36, 1), transform 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
-  .stage-info__col.is-right .rail { left: 100%; transform: translateX(-100%); }
+  /* El indicador sale deslizándose + fundido hacia el lado del cambio y entra por el opuesto: nunca cruza la escena. */
+  .rail { --o: 0px; transform: translateX(calc(var(--x, 0%) + var(--o))); transition: opacity 0.35s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+  .rail[data-side='right'] { left: 100%; --x: -100%; }
+  .rail[data-phase='out'] { opacity: 0; --o: calc(var(--dir, 1) * 56px); pointer-events: none; }
+  .rail[data-phase='pre'] { opacity: 0; --o: calc(var(--dir, 1) * -56px); transition: none; pointer-events: none; }
 }
 
 /* Fallback estático (sin WebGL 2): capítulos en flujo normal */

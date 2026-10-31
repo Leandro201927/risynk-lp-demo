@@ -152,6 +152,8 @@ export class LiveSceneBackend {
     this.contactBlob.userData.bloom = 'hide';
     this.contactBlob.userData.noDepth = true;
     this.scene.add(this.contactBlob);
+    // Sin escritura de profundidad: el plano de apoyo nunca debe recortar órbitas ni el eje que cruzan por debajo del suelo.
+    this.shadowMat.depthWrite = false;
     this.shadowCatcher = new Mesh(new PlaneGeometry(14, 14), this.shadowMat);
     this.shadowCatcher.rotation.x = -Math.PI / 2;
     this.shadowCatcher.position.y = GROUND_Y;
